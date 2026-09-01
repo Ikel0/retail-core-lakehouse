@@ -1,0 +1,15 @@
+name: retail_core
+version: "2.1.0"
+config-version: 2
+profile: retail_core
+model-paths: ["models"]
+test-paths: ["tests"]
+models:
+  retail_core:
+    staging:
+      +materialized: view
+      +tags: ["retail", "staging"]
+    marts:
+      +materialized: incremental
+      +on_schema_change: fail
+      +tags: ["retail", "core_model"]

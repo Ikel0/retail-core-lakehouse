@@ -1,0 +1,16 @@
+services:
+  retail-core:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: retail-core-lakehouse:latest
+    container_name: retail-core-command-center
+    ports:
+      - "8042:8042"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8042/api/health', timeout=2)"]
+      interval: 20s
+      timeout: 3s
+      retries: 3
+      start_period: 10s

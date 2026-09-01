@@ -1,0 +1,20 @@
+version: 2
+models:
+  - name: fct_sales
+    description: Fait de vente omnicanal, grain égal à une commande.
+    columns:
+      - name: order_id
+        tests: [not_null, unique]
+      - name: customer_id
+        tests: [not_null, relationships]
+      - name: product_id
+        tests: [not_null, relationships]
+      - name: sales_amount
+        tests: [not_null]
+  - name: fct_available_to_promise
+    description: Stock disponible à la vente recalculé après chaque micro-batch.
+    columns:
+      - name: product_id
+        tests: [not_null, unique]
+      - name: available_to_promise
+        tests: [not_null]
