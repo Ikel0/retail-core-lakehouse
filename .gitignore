@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+data/warehouse.db
+data/raw/*.csv
+data/curated/*.json
+reports/*.json
+.DS_Store
+dist/
+site/
+docs/_rendered/

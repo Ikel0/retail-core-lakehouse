@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="fr" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Retail Core Lakehouse — cockpit omnicanal de démonstration" />
+    <title>Retail Core Command Center</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <svg aria-hidden="true" class="svg-sprite">
+      <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+      <symbol id="i-stream" viewBox="0 0 24 24"><path d="M4 17l6-6 4 4 6-8"/><path d="M15 7h5v5"/></symbol>
+      <symbol id="i-box" viewBox="0 0 24 24"><path d="M21 8l-9 5-9-5 9-5 9 5z"/><path d="M3 8v8l9 5 9-5V8M12 13v8"/></symbol>
+      <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></symbol>
+      <symbol id="i-pipeline" viewBox="0 0 24 24"><circle cx="5" cy="12" r="3"/><circle cx="19" cy="5" r="3"/><circle cx="19" cy="19" r="3"/><path d="M8 12h4a4 4 0 004-4M8 12h4a4 4 0 014 4"/></symbol>
+      <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></symbol>
+      <symbol id="i-cost" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M16 8.5a4 4 0 10-1 7M8 10h7M8 14h6"/></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 10-2.34 5.66"/><path d="M20 4v7h-7"/></symbol>
+      <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+      <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    </svg>
+
+    <div class="app-shell">
+      <aside class="sidebar" id="sidebar">
+        <div class="brand">
+          <div class="brand-mark">RC</div>
+          <div><strong>Retail Core</strong><span>Command Center</span></div>
+        </div>
+        <div class="environment"><i></i><span>DÉMO LOCALE</span><b>VÉRIFIÉE</b></div>
+        <nav class="nav-list" aria-label="Navigation principale">
+          <button type="button" class="nav-item active" data-view="overview"><svg><use href="#i-grid"/></svg><span>Vue d’ensemble</span></button>
+          <button type="button" class="nav-item" data-view="realtime"><svg><use href="#i-stream"/></svg><span>Temps réel</span><em>REPLAY</em></button>
+          <button type="button" class="nav-item" data-view="inventory"><svg><use href="#i-box"/></svg><span>Stock & ATP</span></button>
+          <button type="button" class="nav-item" data-view="customers"><svg><use href="#i-users"/></svg><span>Customer 360</span></button>
+          <div class="nav-label">PLATEFORME DATA</div>
+          <button type="button" class="nav-item" data-view="pipeline"><svg><use href="#i-pipeline"/></svg><span>Pipeline & Ops</span></button>
+          <button type="button" class="nav-item" data-view="quality"><svg><use href="#i-shield"/></svg><span>Qualité & SCD2</span></button>
+          <button type="button" class="nav-item" data-view="costs"><svg><use href="#i-cost"/></svg><span>FinOps</span></button>
+        </nav>
+        <div class="sidebar-card">
+          <div class="sidebar-card-icon"><svg><use href="#i-bolt"/></svg></div>
+          <div><strong>Capacity Lab</strong><span>Estimez un scénario Black Friday</span></div>
+          <button type="button" id="open-simulation">Calculer un pic</button>
+        </div>
+        <div class="profile"><div class="avatar">IO</div><div><strong>Ikel Ouedraogo</strong><span>Data Engineer</span></div></div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <button type="button" class="mobile-menu" id="mobile-menu" aria-label="Ouvrir le menu" aria-expanded="false">☰</button>
+          <div class="page-heading"><div class="breadcrumb">RETAIL CORE <b>/</b> DATA PRODUCT DEMO</div><h1 id="page-title">Vue d’ensemble</h1></div>
+          <div class="top-actions">
+            <label class="select-wrap"><span>Canal</span><select id="channel-filter" aria-label="Canal de vente"><option value="all">Tous les canaux</option><option value="web">E-commerce</option><option value="store">Magasins</option><option value="marketplace">Marketplace</option></select></label>
+            <label class="select-wrap"><span>Période</span><select id="period-filter" aria-label="Période d’analyse"><option value="7">7 jours</option><option value="14">14 jours</option><option value="30" selected>30 jours</option></select></label>
+            <button type="button" class="primary-button" id="refresh-data" aria-label="Actualiser les données"><span class="pulse-dot"></span><svg class="refresh-icon"><use href="#i-refresh"/></svg><span class="button-label">Actualiser</span></button>
+          </div>
+        </header>
+
+        <div class="status-strip">
+          <span><i class="status-ok"></i>Données synthétiques vérifiées</span><span>Dernier run <b id="last-run">—</b></span><span>Contrat <b id="contract-version">—</b></span><span class="status-right" id="latency-sla">p95 —</span>
+        </div>
+        <section id="view-root" class="view-root" aria-live="polite"></section>
+      </main>
+    </div>
+
+    <div class="modal-backdrop" id="simulation-modal" hidden>
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="simulation-title">
+        <button type="button" class="modal-close" id="close-simulation" aria-label="Fermer"><svg><use href="#i-close"/></svg></button>
+        <div class="modal-kicker">BLACK FRIDAY · CAPACITY MODEL</div>
+        <h2 id="simulation-title">Scénario de capacité retail</h2>
+        <p>Cette estimation déterministe projette le débit, la latence, les unités de capacité et le coût. Elle ne génère aucun trafic cloud réel.</p>
+        <label class="range-head" for="traffic-multiplier"><span>Multiplicateur de trafic</span><strong id="multiplier-value">× 5.0</strong></label>
+        <input id="traffic-multiplier" type="range" min="2" max="12" step="0.5" value="5" />
+        <div class="simulation-baseline"><span>Hypothèse nominale : 42 événements/s</span><svg><use href="#i-arrow"/></svg><b id="projected-rps">210 événements/s</b></div>
+        <button type="button" class="run-button" id="run-simulation"><svg><use href="#i-bolt"/></svg>Calculer le scénario</button>
+        <div id="simulation-result"></div>
+      </section>
+    </div>
+    <div class="toast" id="toast" role="status"></div>
+    <script src="./app.js" defer></script>
+  </body>
+</html>
