@@ -1,0 +1,15 @@
+version: 2
+
+models:
+  - name: int_customer_identity_resolution
+    description: Pont entre les identifiants sources et le Golden Record CRM via email hashé.
+    columns:
+      - name: source_customer_id
+        data_tests: [not_null, unique]
+      - name: customer_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_customers')
+                field: customer_id

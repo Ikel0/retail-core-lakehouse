@@ -1,17 +1,23 @@
-{{ config(unique_key='order_id', incremental_strategy='merge') }}
+{{ config(materialized='incremental', unique_key='order_id', incremental_strategy='merge', on_schema_change='fail') }}
 
 select
-    order_id,
-    customer_id,
-    product_id,
-    channel,
-    quantity,
-    unit_price,
-    discount_rate,
-    sales_amount,
-    ordered_at,
+    o.order_id,
+    i.customer_id,
+    o.source_customer_id,
+    o.product_id,
+    o.channel,
+    o.store_id,
+    o.quantity,
+    o.unit_price,
+    o.discount_rate,
+    o.sales_amount,
+    o.ordered_at,
     current_timestamp as transformed_at
-from {{ ref('stg_orders') }}
+from {{ ref('stg_orders') }} o
+inner join {{ ref('int_customer_identity_resolution') }} i
+    on o.source_customer_id = i.source_customer_id
 {% if is_incremental() %}
-where ordered_at > (select coalesce(max(ordered_at), '1900-01-01') from {{ this }})
+where o.ordered_at > (
+    select coalesce(max(ordered_at), timestamp '1900-01-01') from {{ this }}
+)
 {% endif %}

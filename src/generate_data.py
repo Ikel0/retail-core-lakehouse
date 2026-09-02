@@ -64,6 +64,23 @@ def generate(out: Path, seed: int = 42, order_count: int = 960) -> None:
             }
         )
 
+    customer_identities = []
+    source_prefixes = {
+        "crm": "CRM",
+        "ecommerce": "WEB",
+        "pos": "POS",
+        "marketplace": "MKT",
+    }
+    for customer in customers:
+        for source_system, prefix in source_prefixes.items():
+            customer_identities.append(
+                {
+                    "source_system": source_system,
+                    "source_customer_id": f"{prefix}-{customer['customer_id']}",
+                    "email_hash": customer["email_hash"],
+                }
+            )
+
     stock = []
     for product in products:
         stock.append(
@@ -81,6 +98,7 @@ def generate(out: Path, seed: int = 42, order_count: int = 960) -> None:
     start = now - timedelta(days=29)
     orders: list[dict] = []
     events: list[dict] = []
+    payments: list[dict] = []
     for index in range(1, order_count + 1):
         product = random.choices(products, weights=[14, 10, 13, 6, 9, 8, 5, 8, 7, 8, 6, 6])[0]
         customer = random.choice(customers)
@@ -90,10 +108,18 @@ def generate(out: Path, seed: int = 42, order_count: int = 960) -> None:
         discount = random.choice([0, 0, 0, 0.10, 0.15, 0.20])
         unit_price = round(float(product["price"]) * (1 - discount), 2)
         order_id = f"O{index:06}"
+        source_system = {
+            "web": "ecommerce",
+            "store": "pos",
+            "marketplace": "marketplace",
+        }[channel]
+        source_customer_id = (
+            f"{source_prefixes[source_system]}-{customer['customer_id']}"
+        )
         orders.append(
             {
                 "order_id": order_id,
-                "customer_id": customer["customer_id"],
+                "source_customer_id": source_customer_id,
                 "product_id": product["product_id"],
                 "channel": channel,
                 "store_id": f"S{random.randint(1, 18):03}" if channel == "store" else "ONLINE",
@@ -104,19 +130,32 @@ def generate(out: Path, seed: int = 42, order_count: int = 960) -> None:
                 "payment_status": "paid",
             }
         )
+        payments.append(
+            {
+                "transaction_id": f"T{index:06}",
+                "order_id": order_id,
+                "amount": round(quantity * unit_price, 2),
+                "currency": "EUR",
+                "status": "settled",
+                "payment_method": random.choice(
+                    ["card", "paypal"] if channel != "store" else ["card", "cash"]
+                ),
+                "paid_at": (ordered_at + timedelta(seconds=random.randint(1, 90))).isoformat(),
+            }
+        )
         latency_ms = random.randint(180, 2400)
         events.append(
             {
                 "event_id": f"E{index:07}",
                 "event_type": "purchase",
                 "order_id": order_id,
-                "customer_id": customer["customer_id"],
+                "source_customer_id": source_customer_id,
                 "product_id": product["product_id"],
                 "channel": channel,
                 "quantity": quantity,
                 "event_at": (ordered_at + timedelta(milliseconds=latency_ms)).isoformat(),
                 "latency_ms": latency_ms,
-                "partition_key": customer["customer_id"],
+                "partition_key": source_customer_id,
             }
         )
 
@@ -125,18 +164,19 @@ def generate(out: Path, seed: int = 42, order_count: int = 960) -> None:
         customer = random.choice(customers)
         product = random.choice(products)
         event_at = start + timedelta(seconds=random.randint(0, 29 * 86400))
+        source_customer_id = f"WEB-{customer['customer_id']}"
         events.append(
             {
                 "event_id": f"W{index:07}",
                 "event_type": random.choices(["product_view", "add_to_cart"], [78, 22])[0],
                 "order_id": "",
-                "customer_id": customer["customer_id"],
+                "source_customer_id": source_customer_id,
                 "product_id": product["product_id"],
                 "channel": "web",
                 "quantity": 0,
                 "event_at": event_at.isoformat(),
                 "latency_ms": random.randint(90, 900),
-                "partition_key": customer["customer_id"],
+                "partition_key": source_customer_id,
             }
         )
 
@@ -165,7 +205,9 @@ def generate(out: Path, seed: int = 42, order_count: int = 960) -> None:
 
     _write_csv(out / "products.csv", products)
     _write_csv(out / "customers.csv", customers)
+    _write_csv(out / "customer_identities.csv", customer_identities)
     _write_csv(out / "stock.csv", stock)
     _write_csv(out / "orders.csv", sorted(orders, key=lambda item: item["ordered_at"]))
+    _write_csv(out / "payments.csv", sorted(payments, key=lambda item: item["paid_at"]))
     _write_csv(out / "stream_events.csv", sorted(events, key=lambda item: item["event_at"]))
     _write_csv(out / "price_history.csv", price_history)

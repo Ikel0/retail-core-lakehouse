@@ -1,20 +1,184 @@
 version: 2
+
 models:
+  - name: dim_product
+    description: Référentiel produit avec hiérarchie rayon, catégorie et collection.
+    columns:
+      - name: product_id
+        data_tests: [not_null, unique]
+
+  - name: dim_customer
+    description: Golden Record client pseudonymisé, enrichi des identités résolues.
+    columns:
+      - name: customer_id
+        data_tests: [not_null, unique]
+      - name: resolved_identity_count
+        data_tests: [not_null]
+
+  - name: dim_product_price_scd2
+    description: Historique de prix SCD Type 2.
+    columns:
+      - name: product_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_product')
+                field: product_id
+      - name: valid_from
+        data_tests: [not_null]
+      - name: is_current
+        data_tests: [not_null]
+
   - name: fct_sales
-    description: Fait de vente omnicanal, grain égal à une commande.
+    description: Fait de vente omnicanal incrémental, au grain d'une commande.
     columns:
       - name: order_id
-        tests: [not_null, unique]
+        data_tests: [not_null, unique]
       - name: customer_id
-        tests: [not_null, relationships]
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customer')
+                field: customer_id
       - name: product_id
-        tests: [not_null, relationships]
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_product')
+                field: product_id
+      - name: channel
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [web, store, marketplace]
       - name: sales_amount
-        tests: [not_null]
+        data_tests: [not_null]
+
+  - name: fct_retail_event
+    description: Événement quasi temps réel enrichi avec l'identité client canonique.
+    columns:
+      - name: event_id
+        data_tests: [not_null, unique]
+      - name: customer_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_customer')
+                field: customer_id
+      - name: product_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_product')
+                field: product_id
+
+  - name: fct_payments
+    description: Paiements normalisés au grain d'une transaction.
+    columns:
+      - name: transaction_id
+        data_tests: [not_null, unique]
+      - name: order_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('fct_sales')
+                field: order_id
+      - name: status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [settled]
+
+  - name: fct_payment_reconciliation
+    description: Contrôle détaillé entre le montant vendu et le montant encaissé.
+    columns:
+      - name: order_id
+        data_tests: [not_null, unique]
+      - name: reconciliation_status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [reconciled]
+
   - name: fct_available_to_promise
-    description: Stock disponible à la vente recalculé après chaque micro-batch.
+    description: Stock disponible à la vente recalculé après les ventes.
     columns:
       - name: product_id
-        tests: [not_null, unique]
+        data_tests: [not_null, unique]
       - name: available_to_promise
-        tests: [not_null]
+        data_tests: [not_null]
+      - name: risk_level
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [critical, watch, healthy]
+
+  - name: mart_customer_rfm
+    description: Segmentation RFM calculée sur le Golden Record omnicanal.
+    columns:
+      - name: customer_id
+        data_tests:
+          - not_null
+          - unique
+          - relationships:
+              arguments:
+                to: ref('dim_customer')
+                field: customer_id
+      - name: recency_score
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4]
+      - name: frequency_score
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4]
+      - name: monetary_score
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4]
+      - name: rfm_segment
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [champions, loyal, promising, at_risk, developing]
+
+  - name: mart_repricing_candidates
+    description: Recommandations de prix explicables fondées sur la demande et l'ATP.
+    columns:
+      - name: product_id
+        data_tests:
+          - not_null
+          - unique
+          - relationships:
+              arguments:
+                to: ref('dim_product')
+                field: product_id
+      - name: recommended_action
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [protect_margin, accelerate_sell_through, hold]
+      - name: recommended_price
+        data_tests: [not_null]
+
+unit_tests:
+  - name: test_available_to_promise_formula
+    description: Vérifie le calcul ATP et le seuil de risque sur un cas contrôlé.
+    model: fct_available_to_promise
+    given:
+      - input: ref('stg_inventory')
+        rows:
+          - {product_id: P_TEST, store_stock: 20, warehouse_stock: 40, incoming: 10, reserved: 5, safety_stock: 15}
+      - input: ref('fct_sales')
+        rows:
+          - {product_id: P_TEST, quantity: 35}
+    expect:
+      rows:
+        - {product_id: P_TEST, store_stock: 20, warehouse_stock: 40, incoming: 10, reserved: 5, safety_stock: 15, units_sold: 35, available_to_promise: 30, risk_level: healthy}

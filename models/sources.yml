@@ -1,9 +1,9 @@
 version: 2
 sources:
   - name: raw_retail
-    description: Données brutes déposées par Airbyte, Lambda et Kinesis Firehose.
+    description: Données brutes déposées par le connecteur source et le flux événementiel.
     schema: raw
-    loaded_at_field: ingested_at
+    loaded_at_field: _ingested_at
     freshness:
       warn_after: {count: 30, period: minute}
       error_after: {count: 2, period: hour}
@@ -11,5 +11,8 @@ sources:
       - name: orders
       - name: products
       - name: customers
+      - name: customer_identities
       - name: inventory
-      - name: kinesis_purchase_events
+      - name: payments
+      - name: retail_events
+      - name: price_history
