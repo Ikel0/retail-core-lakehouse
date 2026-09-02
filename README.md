@@ -2,6 +2,8 @@
 
 J’ai conçu ce projet Data Engineering pour démontrer la construction d’un Retail Core Model complet : ingestion hybride, streaming, modélisation, qualité, orchestration, disponibilité stock et maîtrise des coûts.
 
+**Démonstration interactive :** [ouvrir le Retail Core Command Center](https://ikel0.github.io/retail-core-lakehouse/)
+
 **Démonstration :** 960 ventes · 160 clients pseudonymisés · 12 produits · 3 160 événements · 16/16 contrôles qualité.
 
 ## Objectif
