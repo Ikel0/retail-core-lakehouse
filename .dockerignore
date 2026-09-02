@@ -5,8 +5,13 @@ __pycache__
 *.pyc
 .DS_Store
 data/warehouse.db
+data/*.duckdb
 data/raw
 data/curated
 reports/*.json
+target
+logs
+**/.terraform
+*.tfstate
 docs/*.docx
 docs/_rendered

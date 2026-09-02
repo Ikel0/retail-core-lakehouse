@@ -1,0 +1,54 @@
+version: 2
+
+models:
+  - name: stg_orders
+    columns:
+      - name: order_id
+        data_tests: [not_null, unique]
+      - name: source_customer_id
+        data_tests: [not_null]
+      - name: quantity
+        data_tests: [not_null]
+
+  - name: stg_products
+    columns:
+      - name: product_id
+        data_tests: [not_null, unique]
+
+  - name: stg_customers
+    columns:
+      - name: customer_id
+        data_tests: [not_null, unique]
+      - name: email_hash
+        data_tests: [not_null, unique]
+
+  - name: stg_customer_identities
+    columns:
+      - name: source_customer_id
+        data_tests: [not_null, unique]
+      - name: email_hash
+        data_tests: [not_null]
+
+  - name: stg_inventory
+    columns:
+      - name: product_id
+        data_tests: [not_null, unique]
+
+  - name: stg_payments
+    columns:
+      - name: transaction_id
+        data_tests: [not_null, unique]
+      - name: order_id
+        data_tests: [not_null]
+
+  - name: stg_retail_events
+    columns:
+      - name: event_id
+        data_tests: [not_null, unique]
+      - name: source_customer_id
+        data_tests: [not_null]
+
+  - name: stg_price_history
+    columns:
+      - name: product_id
+        data_tests: [not_null]

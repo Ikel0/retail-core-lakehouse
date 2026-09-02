@@ -1,95 +1,170 @@
 # Retail Core Lakehouse
 
-J’ai conçu ce projet Data Engineering pour démontrer la construction d’un Retail Core Model complet : ingestion hybride, streaming, modélisation, qualité, orchestration, disponibilité stock et maîtrise des coûts.
+[![CI](https://github.com/Ikel0/retail-core-lakehouse/actions/workflows/ci.yml/badge.svg)](https://github.com/Ikel0/retail-core-lakehouse/actions/workflows/ci.yml)
 
-**Démonstration interactive :** [ouvrir le Retail Core Command Center](https://ikel0.github.io/retail-core-lakehouse/)
+J’ai conçu ce produit data pour réunir ventes omnicanales, identité client, catalogue, prix, paiements et stocks dans une source de vérité retail contrôlée. Le projet ne se limite pas à un dashboard : un DAG Apache Airflow exécute l’ingestion, les API AWS locales, le modèle de référence, `dbt build`, les rapprochements métier et le publishing gate.
 
-**Démonstration :** 960 ventes · 160 clients pseudonymisés · 12 produits · 3 160 événements · 16/16 contrôles qualité.
+**Démonstration interactive :** [Retail Core Command Center](https://ikel0.github.io/retail-core-lakehouse/)
 
-## Objectif
+## Résultat vérifié
 
-Construire une source de vérité retail omnicanale capable de réunir les ventes e-commerce et magasin, les événements web, le catalogue produit et les stocks. Le projet calcule le stock disponible à la vente (ATP), réconcilie les flux batch et quasi temps réel et expose des KPI opérationnels.
+| Indicateur | Résultat du profil complet |
+|---|---:|
+| Sources ingérées | 8 flux · 5 928 lignes |
+| Ventes / paiements | 960 / 960 |
+| Identités réconciliées | 640 liens vers 160 Golden Records |
+| Événements retail | 3 160 publiés dans Kinesis local |
+| Contrôles Python | 24 / 24 réussis |
+| Build dbt | 19 modèles · 78 tests · 1 snapshot · 0 échec |
+| Réconciliation | 0 unité · 0,00 € |
+| Orchestration | DAG Airflow 3.3.1 · 6 tâches · succès |
 
-## Architecture de démonstration
+Les données sont synthétiques, déterministes et sans information personnelle réelle.
+
+## Architecture
 
 ```text
-CSV/API simulés ──> raw/ ──> validation Python ──> SQLite warehouse
-                                      │                    │
-Événements web ──> stream/ ──────────┘                    └──> curated/ + KPI
-                                                           │
-                                      qualité + monitoring ─┘
+CRM / ERP / PLM / POS / e-commerce
+              │
+              ├── connecteur source compatible Airbyte ──> S3 Raw (LocalStack)
+              │
+              └── événements ──> validation Lambda ──> Kinesis (LocalStack)
+                                                        │
+Apache Airflow 3.3.1 ───────────────────────────────────┤
+  05:15 Europe/Paris · retries · ordre · publishing gate│
+                                                        ▼
+                           DuckDB local ──> dbt Core ──> Retail Marts
+                                              │
+                           tests + snapshot SCD2 + documentation
+                                              │
+                                              ▼
+                      ATP · Customer 360 · KPI · cockpit interactif
+
+Cible de production : S3 / Kinesis / Lambda / CloudWatch + Snowflake
+                      provisionnés par Terraform et orchestrés par Airflow/MWAA
 ```
 
-Les composants sont volontairement découplés : `generate_data.py` simule Airbyte/Kinesis, `pipeline.py` construit le warehouse, `quality.py` applique le publishing gate et `serve.py` expose les données au cockpit interactif.
+## Ce qui est réellement exécuté
+
+| Composant | Niveau de preuve |
+|---|---|
+| Apache Airflow 3.3.1 | Image officielle, DAG importé sans erreur et six tâches exécutées |
+| dbt Core + DuckDB | `dbt build` réel : staging, intermédiaire, marts, tests et snapshot SCD2 |
+| Airbyte | Source locale compatible avec les commandes `spec`, `check`, `discover` et `read` |
+| AWS S3 | Huit fichiers Raw chargés par l’API S3 dans LocalStack |
+| Amazon Kinesis | 3 160 événements écrits par lots et relus depuis un shard local |
+| AWS Lambda | Validation de schéma, versionnement et clé d’idempotence appliqués aux événements |
+| CloudWatch | Métriques, logs et alarme de latence créés via les API AWS locales |
+| Terraform | Stack AWS cible : S3, Kinesis, Lambda, IAM et CloudWatch |
+| Snowflake | Profil dbt cible fourni ; aucun compte Snowflake n’est simulé ni revendiqué |
+
+LocalStack émule les API AWS sur la machine. DuckDB remplace Snowflake pour rendre le build gratuit et reproductible. Ces substitutions sont explicites dans le code, le cockpit et la documentation.
 
 ## Démarrage rapide
 
-### Avec Docker — recommandé
+### Cockpit uniquement
 
 ```bash
-docker compose up --build -d
+docker compose up --build -d retail-core
 ```
 
-Ouvrir [http://127.0.0.1:8042](http://127.0.0.1:8042). Pour arrêter :
+Ouvrir [http://127.0.0.1:8042](http://127.0.0.1:8042).
+
+### Plateforme complète avec Airflow et AWS local
 
 ```bash
-docker compose down
+docker compose --profile platform up --build -d
+make airflow-test
 ```
 
-### Sans Docker
+- Cockpit : [http://127.0.0.1:8042](http://127.0.0.1:8042)
+- Airflow : [http://127.0.0.1:8080](http://127.0.0.1:8080)
+- Endpoint AWS local : `http://127.0.0.1:4566`
+
+Le mode administrateur automatique d’Airflow est réservé à cette démonstration locale. Il ne doit pas être utilisé en production.
+
+Pour arrêter les services :
 
 ```bash
-cd retail-core-lakehouse
-python3 run_demo.py
-python3 serve.py
+docker compose --profile platform down
 ```
 
-Ouvrir ensuite [http://127.0.0.1:8042](http://127.0.0.1:8042). Pour les tests :
+### Exécutions ciblées
 
 ```bash
-python3 -m unittest discover -s tests -v
+make dbt-docker       # dbt build dans une image isolée
+make aws-local        # S3, Kinesis, Lambda et CloudWatch via LocalStack
+make test             # tests Python rapides
+make terraform-validate
 ```
 
-Le résultat est écrit dans `data/warehouse.db`, `data/curated/retail_kpis.json` et `reports/quality_report.json`. Le cockpit comporte sept vues : direction, temps réel, ATP, Customer 360, Pipeline & Ops, Qualité/SCD2 et FinOps.
+Sans Docker, le chemin de référence reste disponible avec `python3 run_demo.py`, puis `python3 serve.py`.
 
-### Version statique pour GitHub Pages
+## DAG Airflow
 
-```bash
-python3 run_demo.py
-python3 build_portfolio.py
-python3 -m http.server 4173 --directory site
+Le DAG `retail_core_daily` est planifié à 05:15, heure de Paris, afin de conserver une fenêtre de reprise avant le SLA métier de 08:00. Il impose un seul run actif et deux retries espacés de cinq minutes.
+
+```text
+extract_sources
+      ↓
+stage_local_aws
+      ↓
+build_reference_warehouse
+      ↓
+dbt_build
+      ↓
+reconcile_platform
+      ↓
+publish_kpis
 ```
 
-Ouvrir [http://127.0.0.1:4173](http://127.0.0.1:4173). Cette version embarque les 12 combinaisons canal/période et le modèle de capacité : les filtres, les KPI et la simulation restent interactifs sans backend.
+La dernière tâche ne publie rien si un test, une étape activée, le rapprochement batch/Kinesis ou le rapprochement ventes/paiements échoue.
 
-## Cas métier démontrés
+## Modèle retail
 
-- Customer 360 omnicanal avec résolution par email hashé.
-- SCD Type 2 simplifié sur les prix produits.
-- ATP : stock physique - ventes - réservations + réapprovisionnements.
-- Réconciliation des ventes streaming avec les ventes batch.
-- Contrôles d’unicité, intégrité référentielle, montants et fraîcheur.
-- Modèle déterministe de capacité Black Friday et suivi de la latence des événements.
+Les huit sources représentent le catalogue, les clients, les identités par canal, les stocks, les commandes, les paiements, les événements et l’historique des prix. Elles alimentent notamment :
 
-## Correspondance avec un poste Data Engineer Retail
+- `dim_product` et ses hiérarchies produit ;
+- `dim_customer` et le Golden Record pseudonymisé ;
+- `dim_product_price_scd2` pour l’historique des prix ;
+- `fct_sales`, `fct_payments` et leur rapprochement ;
+- `fct_retail_event` pour le flux omnicanal ;
+- `fct_available_to_promise` pour l’ATP ;
+- `snp_inventory_state` pour l’historisation SCD2 des états de stock.
 
-| Compétence attendue | Démonstration |
-|---|---|
-| AWS S3 / Lakehouse | zones `raw/` et `curated/` |
-| Airbyte | ingestion des fichiers sources |
-| Kinesis | événements web simulés dans `stream_events.csv` |
-| Lambda | validation et normalisation à l’entrée |
-| dbt / Snowflake | modèles staging/marts, incrémental et tests dans `models/` |
-| Airflow | DAG avec dépendances, retries et publishing gate dans `dags/` |
-| Data quality | rapport JSON avec contrôles bloquants |
-| CloudWatch / FinOps | p95 calculée, modèle de coût explicite et scénario de capacité |
+Le calcul ATP est :
 
-Les services cloud sont présentés comme une **architecture cible**. La version exécutable utilise CSV, Python et SQLite ; elle ne prétend pas appeler réellement AWS, Snowflake ou Airflow. Les coûts sont un scénario pédagogique cohérent basé sur 3,2 millions d’événements mensuels, pas une facture fournisseur.
+```text
+stock magasin + stock entrepôt + entrant - réservations - unités vendues
+```
 
-## Pitch entretien
+## Fiabilité et exploitation
 
-> J'ai construit une plateforme Retail Core qui réconcilie les ventes batch et streaming, calcule le stock disponible à la vente et fournit des indicateurs fiables pour le pilotage omnicanal. J'ai séparé les zones raw et curated, ajouté des contrôles de qualité et prévu la transposition vers S3, Kinesis et Snowflake.
+Les contrôles couvrent l’unicité, les références, les domaines de valeurs, la résolution d’identité, la pseudonymisation, les paiements, la fraîcheur, les partitions Kinesis et les périodes SCD2. Les tests dbt complètent ces contrats au niveau staging et marts, avec notamment des assertions singulières sur l’ATP, les identités et les deux rapprochements.
 
-Voir aussi [`docs/INTERVIEW.md`](docs/INTERVIEW.md) et [`docs/PORTFOLIO.md`](docs/PORTFOLIO.md).
+Le cockpit présente sept angles : performance commerciale, événements, ATP, Customer 360, plateforme, qualité/SCD2 et FinOps. Les filtres canal/période recalculent les KPI et les deux rapprochements sur le même périmètre.
 
-La documentation détaillée du fonctionnement, des données, des KPI et des choix d’architecture est disponible dans [`docs/PROJECT_GUIDE.md`](docs/PROJECT_GUIDE.md).
+## Structure du dépôt
+
+```text
+dags/                 DAG Airflow réel
+connectors/           source compatible Airbyte
+src/                  génération, pipeline, dbt runner, orchestration, AWS local
+models/ dbt_tests/    modèles, tests et unité dbt
+snapshots/            SCD2 des états de stock
+lambda/               validation événementielle
+infra/terraform/      infrastructure AWS cible
+dashboard/            cockpit sombre et responsive
+tests/                tests automatisés
+docs/                 architecture, guide et déroulé de démonstration
+```
+
+## Documentation
+
+- [Architecture et flux](docs/ARCHITECTURE.md)
+- [Guide fonctionnel et technique](docs/PROJECT_GUIDE.md)
+- [Matrice exigences / preuves](docs/IMPLEMENTATION_MATRIX.md)
+- [Déroulé de démonstration](docs/DEMO_RUNBOOK.md)
+- [Dossier professionnel](docs/Retail_Core_Lakehouse_Ikel_Ouedraogo.docx)
+
+Ce projet montre une démarche de Data Engineer orientée produit : partir des décisions métier, définir les grains et les invariants, automatiser les preuves, puis rendre l’ensemble observable et déployable.

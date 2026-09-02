@@ -1,10 +1,17 @@
 __pycache__/
 *.pyc
 data/warehouse.db
+data/*.duckdb
 data/raw/*.csv
 data/curated/*.json
 reports/*.json
+target/
+logs/
+.terraform/
+*.tfstate
+*.tfstate.*
 .DS_Store
 dist/
 site/
 docs/_rendered/
+profiles/.user.yml

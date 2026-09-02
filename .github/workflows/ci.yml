@@ -1,0 +1,60 @@
+name: Quality gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: retail-core-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dbt.txt
+
+      - name: Install dbt runtime
+        run: python -m pip install --disable-pip-version-check -r requirements-dbt.txt
+
+      - name: Run reference pipeline and tests
+        run: |
+          python run_demo.py
+          python -m unittest discover -s tests -v
+          node --check dashboard/app.js
+
+      - name: Run dbt quality gate
+        run: python -m src.dbt_runner build --full-refresh --no-generate
+
+      - name: Build static cockpit
+        run: python build_portfolio.py
+
+      - name: Validate Compose model
+        run: docker compose --profile platform --profile tools config --quiet
+
+      - name: Build cockpit image
+        run: docker build -t retail-core-lakehouse:ci .
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Validate infrastructure
+        run: |
+          make package-lambda
+          terraform fmt -check -recursive infra/terraform
+          terraform -chdir=infra/terraform init -backend=false
+          terraform -chdir=infra/terraform validate

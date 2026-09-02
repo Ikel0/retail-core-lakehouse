@@ -37,14 +37,16 @@ def run(data_dir: Path) -> dict:
     phase_started = perf_counter()
     products = read_csv(raw / "products.csv")
     customers = read_csv(raw / "customers.csv")
+    customer_identities = read_csv(raw / "customer_identities.csv")
     stock = read_csv(raw / "stock.csv")
     orders = read_csv(raw / "orders.csv")
+    payments = read_csv(raw / "payments.csv")
     events = read_csv(raw / "stream_events.csv")
     price_history = read_csv(raw / "price_history.csv")
     phases.append(
         {
             "name": "extract_sources",
-            "label": "Lecture des 6 sources CSV",
+            "label": "Lecture des 8 sources retail",
             "duration_ms": round((perf_counter() - phase_started) * 1000, 1),
             "status": "PASS",
         }
@@ -55,7 +57,9 @@ def run(data_dir: Path) -> dict:
         {
             "orders": orders,
             "events": events,
+            "payments": payments,
             "customers": customers,
+            "customer_identities": customer_identities,
             "product_ids": {product["product_id"] for product in products},
             "customer_ids": {customer["customer_id"] for customer in customers},
             "price_history": price_history,
@@ -81,10 +85,12 @@ def run(data_dir: Path) -> dict:
         DROP TABLE IF EXISTS fact_sales;
         DROP TABLE IF EXISTS dim_product;
         DROP TABLE IF EXISTS dim_customer;
+        DROP TABLE IF EXISTS bridge_customer_identity;
         DROP TABLE IF EXISTS dim_product_price_scd2;
         DROP TABLE IF EXISTS fact_inventory;
         DROP TABLE IF EXISTS fact_web_event;
         DROP TABLE IF EXISTS fact_retail_event;
+        DROP TABLE IF EXISTS fact_payment;
         CREATE TABLE dim_product(
           product_id TEXT PRIMARY KEY, name TEXT, category TEXT,
           department TEXT, collection_name TEXT, current_price REAL
@@ -93,12 +99,17 @@ def run(data_dir: Path) -> dict:
           customer_id TEXT PRIMARY KEY, email_hash TEXT, loyalty_id TEXT,
           country TEXT, acquisition_channel TEXT, consent_marketing INTEGER
         );
+        CREATE TABLE bridge_customer_identity(
+          source_system TEXT, source_customer_id TEXT PRIMARY KEY,
+          email_hash TEXT, customer_id TEXT
+        );
         CREATE TABLE dim_product_price_scd2(
           product_id TEXT, price REAL, valid_from TEXT, valid_to TEXT,
           is_current INTEGER, PRIMARY KEY(product_id, valid_from)
         );
         CREATE TABLE fact_sales(
-          order_id TEXT PRIMARY KEY, customer_id TEXT, product_id TEXT,
+          order_id TEXT PRIMARY KEY, customer_id TEXT, source_customer_id TEXT,
+          product_id TEXT,
           channel TEXT, store_id TEXT, quantity INTEGER, unit_price REAL,
           discount_rate REAL, sales_amount REAL, ordered_at TEXT
         );
@@ -109,8 +120,13 @@ def run(data_dir: Path) -> dict:
         );
         CREATE TABLE fact_retail_event(
           event_id TEXT PRIMARY KEY, event_type TEXT, order_id TEXT,
-          customer_id TEXT, product_id TEXT, channel TEXT, quantity INTEGER,
+          customer_id TEXT, source_customer_id TEXT, product_id TEXT,
+          channel TEXT, quantity INTEGER,
           event_at TEXT, latency_ms INTEGER, partition_key TEXT
+        );
+        CREATE TABLE fact_payment(
+          transaction_id TEXT PRIMARY KEY, order_id TEXT, amount REAL,
+          currency TEXT, status TEXT, payment_method TEXT, paid_at TEXT
         );
         """
     )
@@ -134,6 +150,23 @@ def run(data_dir: Path) -> dict:
             for row in customers
         ],
     )
+    customer_by_hash = {row["email_hash"]: row["customer_id"] for row in customers}
+    identity_to_customer = {
+        row["source_customer_id"]: customer_by_hash[row["email_hash"]]
+        for row in customer_identities
+    }
+    cursor.executemany(
+        "INSERT INTO bridge_customer_identity VALUES(?,?,?,?)",
+        [
+            (
+                row["source_system"],
+                row["source_customer_id"],
+                row["email_hash"],
+                identity_to_customer[row["source_customer_id"]],
+            )
+            for row in customer_identities
+        ],
+    )
     cursor.executemany(
         "INSERT INTO dim_product_price_scd2 VALUES(?,?,?,?,?)",
         [
@@ -145,10 +178,11 @@ def run(data_dir: Path) -> dict:
         ],
     )
     cursor.executemany(
-        "INSERT INTO fact_sales VALUES(?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO fact_sales VALUES(?,?,?,?,?,?,?,?,?,?,?)",
         [
             (
-                row["order_id"], row["customer_id"], row["product_id"], row["channel"],
+                row["order_id"], identity_to_customer[row["source_customer_id"]],
+                row["source_customer_id"], row["product_id"], row["channel"],
                 row["store_id"], int(row["quantity"]), float(row["unit_price"]),
                 float(row["discount_rate"]), int(row["quantity"]) * float(row["unit_price"]),
                 row["ordered_at"],
@@ -157,14 +191,26 @@ def run(data_dir: Path) -> dict:
         ],
     )
     cursor.executemany(
-        "INSERT INTO fact_retail_event VALUES(?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO fact_retail_event VALUES(?,?,?,?,?,?,?,?,?,?,?)",
         [
             (
-                row["event_id"], row["event_type"], row["order_id"], row["customer_id"],
-                row["product_id"], row["channel"], int(row["quantity"]), row["event_at"],
-                int(row["latency_ms"]), row["partition_key"],
+                row["event_id"], row["event_type"], row["order_id"],
+                identity_to_customer[row["source_customer_id"]],
+                row["source_customer_id"], row["product_id"], row["channel"],
+                int(row["quantity"]), row["event_at"], int(row["latency_ms"]),
+                row["partition_key"],
             )
             for row in events
+        ],
+    )
+    cursor.executemany(
+        "INSERT INTO fact_payment VALUES(?,?,?,?,?,?,?)",
+        [
+            (
+                row["transaction_id"], row["order_id"], float(row["amount"]),
+                row["currency"], row["status"], row["payment_method"], row["paid_at"],
+            )
+            for row in payments
         ],
     )
 
@@ -191,7 +237,7 @@ def run(data_dir: Path) -> dict:
     phases.append(
         {
             "name": "build_core_model",
-            "label": "6 tables dimensionnelles et de faits",
+            "label": "8 tables cœur, identité et paiements",
             "duration_ms": round((perf_counter() - phase_started) * 1000, 1),
             "status": "PASS",
         }
@@ -201,26 +247,38 @@ def run(data_dir: Path) -> dict:
     batch_units = sum(int(order["quantity"]) for order in orders)
     purchase_events = [event for event in events if event["event_type"] == "purchase"]
     stream_units = sum(int(event["quantity"]) for event in purchase_events)
+    sales_amount = sum(int(order["quantity"]) * float(order["unit_price"]) for order in orders)
+    payment_amount = sum(float(payment["amount"]) for payment in payments)
     reconciliation = {
         "batch_units": batch_units,
         "stream_units": stream_units,
         "delta": batch_units - stream_units,
-        "status": "PASS" if batch_units == stream_units else "FAIL",
+        "sales_amount": round(sales_amount, 2),
+        "payment_amount": round(payment_amount, 2),
+        "amount_delta": round(sales_amount - payment_amount, 2),
+        "status": "PASS"
+        if batch_units == stream_units
+        and math.isclose(sales_amount, payment_amount, abs_tol=0.005)
+        else "FAIL",
     }
     phases.append(
         {
             "name": "reconcile_stream",
-            "label": f"Écart batch/stream : {reconciliation['delta']}",
+            "label": (
+                f"Écarts unités : {reconciliation['delta']} · paiements : "
+                f"{reconciliation['amount_delta']:.2f} €"
+            ),
             "duration_ms": round((perf_counter() - phase_started) * 1000, 1),
             "status": reconciliation["status"],
         }
     )
-    sales_amount = sum(int(order["quantity"]) * float(order["unit_price"]) for order in orders)
     latencies = [int(event["latency_ms"]) for event in events]
     kpis = {
         "sales_amount": round(sales_amount, 2),
         "orders": len(orders),
-        "customers": len({order["customer_id"] for order in orders}),
+        "customers": len(
+            {identity_to_customer[order["source_customer_id"]] for order in orders}
+        ),
         "products": len(products),
         "events": len(events),
         "total_atp": sum(row[7] for row in inventory_rows),
@@ -235,7 +293,9 @@ def run(data_dir: Path) -> dict:
         "row_counts": {
             "products": len(products),
             "customers": len(customers),
+            "identity_links": len(customer_identities),
             "orders": len(orders),
+            "payments": len(payments),
             "events": len(events),
             "price_versions": len(price_history),
         },

@@ -28,6 +28,17 @@ def _rows(cursor) -> list[dict]:
     return [dict(row) for row in cursor.fetchall()]
 
 
+def _optional_report(name: str) -> dict:
+    """Read optional execution evidence without breaking the lightweight demo."""
+    path = QUALITY_PATH.with_name(name)
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
 def _segment(spend: float, order_count: int) -> str:
     if spend >= 1200 or order_count >= 14:
         return "Champions"
@@ -215,20 +226,46 @@ def build_dashboard(channel: str = "all", period: int = 30) -> dict:
         reconciliation = dict(
             connection.execute(
                 f"""
-                SELECT COALESCE(SUM(s.quantity), 0) batch_units,
-                       COALESCE(SUM(e.quantity), 0) stream_units
-                FROM fact_sales s
-                LEFT JOIN fact_retail_event e
-                  ON e.order_id = s.order_id AND e.event_type = 'purchase'
-                {sales_where}
+                WITH selected_sales AS (
+                  SELECT s.order_id, s.quantity, s.sales_amount
+                  FROM fact_sales s {sales_where}
+                )
+                SELECT
+                  COALESCE((SELECT SUM(quantity) FROM selected_sales), 0) batch_units,
+                  COALESCE((
+                    SELECT SUM(e.quantity)
+                    FROM fact_retail_event e
+                    JOIN selected_sales s ON s.order_id = e.order_id
+                    WHERE e.event_type = 'purchase'
+                  ), 0) stream_units,
+                  COALESCE((SELECT ROUND(SUM(sales_amount), 2) FROM selected_sales), 0) sales_amount,
+                  COALESCE((
+                    SELECT ROUND(SUM(p.amount), 2)
+                    FROM fact_payment p
+                    JOIN selected_sales s ON s.order_id = p.order_id
+                    WHERE p.status = 'settled'
+                  ), 0) payment_amount
                 """,
                 sales_params,
             ).fetchone()
         )
 
     quality = json.loads(QUALITY_PATH.read_text(encoding="utf-8"))
-    reconciliation["delta"] = reconciliation["batch_units"] - reconciliation["stream_units"]
-    reconciliation["status"] = "PASS" if reconciliation["delta"] == 0 else "FAIL"
+    airbyte_report = _optional_report("airbyte_source_report.json")
+    aws_report = _optional_report("aws_local_report.json")
+    dbt_report = _optional_report("dbt_run_report.json")
+    platform_report = _optional_report("platform_reconciliation.json")
+    publish_manifest = _optional_report("publish_manifest.json")
+    reconciliation["unit_delta"] = reconciliation["batch_units"] - reconciliation["stream_units"]
+    reconciliation["amount_delta"] = round(
+        reconciliation["sales_amount"] - reconciliation["payment_amount"], 2
+    )
+    reconciliation["delta"] = reconciliation["unit_delta"]
+    reconciliation["status"] = (
+        "PASS"
+        if reconciliation["unit_delta"] == 0 and abs(reconciliation["amount_delta"]) <= 0.005
+        else "FAIL"
+    )
     total_atp = sum(item["atp"] for item in inventory)
     latency_p95 = _percentile(latency_values, 0.95)
     kpi.update(
@@ -243,6 +280,48 @@ def build_dashboard(channel: str = "all", period: int = 30) -> dict:
         {"name": name, "status": "PASS" if passed else "FAIL", "domain": name.split(".")[0]}
         for name, passed in quality["quality"]["checks"].items()
     ]
+    platform_ok = platform_report.get("status") == "PASS"
+    published = publish_manifest.get("status") == "PUBLISHED"
+    airbyte_ok = airbyte_report.get("status") == "PASS"
+    aws_ok = aws_report.get("status") == "PASS"
+    dbt_ok = dbt_report.get("status") == "PASS"
+    platform_evidence = {
+        "status": "PASS" if platform_ok and published else "NOT_RUN",
+        "airflow": {
+            "status": "PASS" if platform_ok and published else "READY",
+            "version": "3.3.1",
+            "dag_id": "retail_core_daily",
+            "tasks": 6,
+            "schedule": "05:15 Europe/Paris",
+        },
+        "airbyte": {
+            "status": "PASS" if airbyte_ok else "READY",
+            "streams": airbyte_report.get("streams", 8),
+            "records": airbyte_report.get("records", 0),
+        },
+        "aws": {
+            "status": "PASS" if aws_ok else "READY",
+            "mode": aws_report.get("mode", "localstack_emulation"),
+            "s3_objects": aws_report.get("s3", {}).get("objects_uploaded", 0),
+            "kinesis_events": aws_report.get("kinesis", {}).get("events_published", 0),
+            "lambda_events": aws_report.get("lambda_preprocessing", {}).get("validated_events", 0),
+            "cloudwatch_metrics": aws_report.get("cloudwatch", {}).get("metrics_published", 0),
+        },
+        "dbt": {
+            "status": "PASS" if dbt_ok else "READY",
+            "adapter": dbt_report.get("adapter", "duckdb"),
+            "models": dbt_report.get("models", 19),
+            "tests": dbt_report.get("tests", 78),
+            "snapshots": dbt_report.get("snapshots", 1),
+            "failed": len(dbt_report.get("failed", [])),
+        },
+        "publishing": {
+            "status": publish_manifest.get("status", "READY"),
+            "sla": publish_manifest.get("sla", "08:00 Europe/Paris"),
+            "unit_delta": platform_report.get("unit_delta", reconciliation["unit_delta"]),
+            "payment_delta": platform_report.get("payment_delta", reconciliation["amount_delta"]),
+        },
+    }
     return {
         "meta": {
             "environment": "DEMO LOCALE",
@@ -266,14 +345,16 @@ def build_dashboard(channel: str = "all", period: int = 30) -> dict:
         "reconciliation": reconciliation,
         "price_scd": price_scd,
         "pipeline_run": quality.get("run", {"status": "UNKNOWN", "duration_ms": 0, "phases": [], "row_counts": {}}),
+        "platform_evidence": platform_evidence,
         "pipeline": [
-            {"name": "Airbyte", "role": "Ingestion SaaS / ERP / CRM", "status": "target", "metric": "BATCH"},
-            {"name": "Amazon S3", "role": "Zone Raw partitionnée", "status": "target", "metric": "STOCKAGE"},
-            {"name": "AWS Lambda", "role": "Validation événementielle", "status": "target", "metric": "SERVERLESS"},
-            {"name": "Kinesis", "role": "Flux d’événements retail", "status": "target", "metric": "STREAM"},
-            {"name": "dbt Core", "role": "Modèle cœur et tests", "status": "target", "metric": "SQL"},
-            {"name": "Snowflake", "role": "Single Source of Truth", "status": "target", "metric": "WAREHOUSE"},
-            {"name": "Airflow", "role": "Orchestration et reprises", "status": "target", "metric": "DAG"},
+            {"name": "Airbyte", "role": "Connecteur source compatible", "status": "executed" if airbyte_ok else "ready", "metric": f"{platform_evidence['airbyte']['streams']} FLUX"},
+            {"name": "Amazon S3", "role": "Raw partitionné · LocalStack", "status": "emulated" if aws_ok else "ready", "metric": f"{platform_evidence['aws']['s3_objects']} OBJETS"},
+            {"name": "AWS Lambda", "role": "Validation événementielle", "status": "emulated" if aws_ok else "ready", "metric": f"{platform_evidence['aws']['lambda_events']} VALIDÉS"},
+            {"name": "Kinesis", "role": "Streaming · LocalStack", "status": "emulated" if aws_ok else "ready", "metric": f"{platform_evidence['aws']['kinesis_events']} EVENTS"},
+            {"name": "dbt Core", "role": "Transformation et contrats", "status": "executed" if dbt_ok else "ready", "metric": f"{platform_evidence['dbt']['models']} MODÈLES"},
+            {"name": "DuckDB", "role": "Warehouse local exécutable", "status": "executed" if dbt_ok else "ready", "metric": f"{platform_evidence['dbt']['tests']} TESTS"},
+            {"name": "Airflow", "role": "DAG, retries et publication", "status": "executed" if platform_ok else "ready", "metric": "6 TÂCHES"},
+            {"name": "Snowflake", "role": "Warehouse de production", "status": "target", "metric": "CIBLE"},
         ],
         "costs": _cost_scenario(),
         "capacity_preview": simulate_black_friday(5),
@@ -374,13 +455,23 @@ class RetailHandler(BaseHTTPRequestHandler):
         return
 
 
+def _ensure_runtime_assets() -> None:
+    """Create the lightweight reference assets when mounted volumes are empty."""
+    if DB_PATH.exists() and QUALITY_PATH.exists():
+        return
+    from src.generate_data import generate
+    from src.pipeline import run
+
+    generate(ROOT / "data" / "raw")
+    run(ROOT / "data")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Serve the Retail Core cockpit")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8042, type=int)
     args = parser.parse_args()
-    if not DB_PATH.exists():
-        raise SystemExit("Warehouse missing. Run `python3 run_demo.py` first.")
+    _ensure_runtime_assets()
     server = ThreadingHTTPServer((args.host, args.port), RetailHandler)
     print(f"Retail Core cockpit: http://{args.host}:{args.port}")
     try:

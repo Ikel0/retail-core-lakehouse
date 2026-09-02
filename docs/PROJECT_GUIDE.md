@@ -1,232 +1,310 @@
 # Retail Core Lakehouse
 
-## Projet Data Engineering retail omnicanal
+## Dossier fonctionnel et technique
 
 **Auteur : Ikel Ouedraogo — Data Engineer**  
-**Contexte : démonstrateur de compétences pour un poste Data Engineer spécialisé retail**
+**Nature : produit data retail omnicanal, exécutable localement et transposable vers AWS/Snowflake**
 
-## 1. Résumé du projet
+## 1. Résumé exécutif
 
-J’ai conçu ce projet pour démontrer ma capacité à construire un Retail Core Model moderne, fiable et orienté produit. Mon objectif est de réunir les données provenant du CRM, du catalogue produit, des points de vente, de l’e-commerce et des stocks dans une même source de vérité.
+J’ai construit ce projet pour résoudre un problème fréquent dans le retail : les commandes, paiements, clients, produits, stocks et événements digitaux vivent dans des systèmes différents et ne produisent pas toujours le même chiffre.
 
-La plateforme traite à la fois des données batch et des événements quasi temps réel. Elle calcule les indicateurs nécessaires au pilotage commercial, mesure le stock disponible à la vente, réconcilie les ventes streaming avec les agrégats batch et bloque la publication si un contrôle critique échoue.
+La plateforme rassemble huit flux dans un Retail Core Model, résout les identités clients entre quatre systèmes, calcule le stock disponible à la vente, rapproche le temps réel avec le batch et les paiements avec les ventes, puis bloque toute publication si une preuve de qualité échoue.
 
-Le démonstrateur contient 960 ventes, 160 clients pseudonymisés, 12 produits, 24 versions de prix SCD Type 2 et 3 160 événements. Les données sont entièrement synthétiques : aucune donnée d’entreprise ni aucune donnée personnelle réelle n’est utilisée.
+Le profil complet est réellement orchestré par Apache Airflow 3.3.1. Il exerce les API S3, Kinesis et CloudWatch dans LocalStack, applique un validateur Lambda-compatible, exécute `dbt build` sur DuckDB et produit un manifeste de publication auditable.
 
-## 2. Problème métier traité
+Résultat de référence :
 
-Dans un environnement retail omnicanal, plusieurs systèmes décrivent la même activité sous des angles différents :
+- 8 flux et 5 928 lignes sources ;
+- 960 commandes et 960 paiements ;
+- 3 160 événements retail ;
+- 640 identités sources rattachées à 160 Golden Records ;
+- 24 contrôles Python réussis ;
+- 19 modèles, 78 tests et 1 snapshot dbt, sans échec ;
+- 0 unité d’écart entre batch et Kinesis ;
+- 0,00 € d’écart entre ventes et paiements.
 
-- le POS enregistre les ventes magasin ;
-- l’e-commerce produit des commandes et des événements web ;
-- le CRM conserve les identités et les consentements clients ;
-- le PLM ou l’ERP porte le catalogue produit ;
-- le WMS et les outils supply chain décrivent les stocks et les réapprovisionnements.
+Toutes les données sont synthétiques. Aucune donnée client ou entreprise réelle n’est utilisée.
 
-Sans modèle central, les équipes peuvent obtenir des chiffres différents pour une même question. Mon projet construit donc une Single Source of Truth capable de répondre de manière cohérente à des questions telles que : combien ai-je vendu, quel stock puis-je encore promettre, un client web et magasin est-il le même client, et les ventes temps réel sont-elles exactes en fin de journée ?
+## 2. Problème métier
 
-## 3. Architecture
+Un retailer omnicanal doit pouvoir répondre rapidement et sans ambiguïté à cinq questions :
+
+1. Combien avons-nous vendu, sur quel canal et dans quelle catégorie ?
+2. Les achats visibles dans le flux événementiel correspondent-ils au batch comptable ?
+3. Les montants encaissés correspondent-ils aux commandes enregistrées ?
+4. Quel stock pouvons-nous encore promettre au client ?
+5. Un identifiant CRM, web, POS et marketplace représente-t-il la même personne ?
+
+Le projet traite ces questions comme les responsabilités d’un produit data : grains explicites, contrats, SLA, observabilité, reprise, coût et documentation.
+
+## 3. Données
+
+| Source | Volume | Grain | Champs clés | Rôle métier |
+|---|---:|---|---|---|
+| `products.csv` | 12 | un produit | catégorie, département, collection, prix | hiérarchie et catalogue |
+| `customers.csv` | 160 | un Golden Record | hash email, fidélité, pays, consentement | Customer 360 |
+| `customer_identities.csv` | 640 | une identité par système | source, source customer ID, hash | résolution CRM/web/POS/marketplace |
+| `stock.csv` | 12 | un état de stock produit | magasin, entrepôt, réservé, entrant, sécurité | ATP et risque de rupture |
+| `orders.csv` | 960 | une commande | canal, produit, quantité, prix, remise | performance commerciale |
+| `payments.csv` | 960 | une transaction | commande, montant, statut, moyen | rapprochement financier |
+| `stream_events.csv` | 3 160 | un événement | type, partition, latence, horodatage | parcours et quasi temps réel |
+| `price_history.csv` | 24 | une version de prix | début, fin, prix, version courante | SCD Type 2 et repricing |
+
+Les commandes et événements portent d’abord `source_customer_id`. La table de correspondance utilise le hash email pour les rattacher au `customer_id` canonique. Cela sépare correctement l’identité opérationnelle de l’identité analytique.
+
+## 4. Parcours de la donnée
+
+### 4.1 Ingestion compatible Airbyte
+
+La source `connectors/source_retail` implémente les opérations essentielles du protocole :
+
+- `spec` décrit la configuration ;
+- `check` vérifie les huit fichiers attendus ;
+- `discover` expose le catalogue et les schémas JSON ;
+- `read` émet des messages `RECORD` et un état final au format JSON Lines.
+
+Le DAG réutilise le même inventaire de source. La logique testée par la commande locale n’est donc pas une maquette séparée de l’orchestration.
+
+### 4.2 Zone Raw S3
+
+Quand le profil AWS local est activé, chaque fichier est envoyé par l’API S3 dans une clé de la forme :
 
 ```text
-CRM / ERP / PLM ── Airbyte ───────────────┐
-POS / E-commerce ─ Kinesis ─ Lambda ─────┼── S3 Raw ─ dbt ─ Snowflake ─ Retail Marts
-Fichiers Supply ── Airbyte ───────────────┘                  │
-                                                            ├── Ventes et marge
-Airflow / MWAA : orchestration, reprises, backfills ────────┼── Stock et ATP
-CloudWatch : logs, métriques et alertes ────────────────────┼── Customer 360
-Data contracts : qualité et réconciliation ────────────────┘
+raw/<source>/ingestion_date=YYYY-MM-DD/<source>.csv
 ```
 
-La version locale utilise des fichiers CSV pour la zone Raw et SQLite pour le warehouse. Ce choix rend le projet exécutable gratuitement, tout en conservant des frontières compatibles avec AWS S3, Amazon Kinesis, AWS Lambda, Snowflake, dbt et Airflow.
+Ce partitionnement rend les reprises et la rétention explicites. Le module refuse tout endpoint AWS non local, sauf autorisation volontaire, ce qui évite un envoi accidentel vers un compte réel.
 
-## 4. Données utilisées
+### 4.3 Validation Lambda-compatible et Kinesis
 
-| Jeu de données | Grain | Exemples de champs | Usage |
-|---|---|---|---|
-| `products.csv` | Un produit | catégorie, département, collection, prix | Référentiel et analyses produit |
-| `customers.csv` | Un client | email hashé, loyalty ID, pays, consentement | Customer 360 et segmentation |
-| `orders.csv` | Une commande | canal, magasin, quantité, prix, remise | Chiffre d’affaires et panier moyen |
-| `stream_events.csv` | Un événement | type, partition, latence, timestamp | Kinesis, conversion et monitoring |
-| `stock.csv` | Un produit | stock magasin, entrepôt, réservé, entrant | Calcul de l’ATP |
-| `price_history.csv` | Une version de prix | validité, prix, version courante | Historisation SCD Type 2 |
+Le validateur vérifie les champs obligatoires, le timestamp, la version de schéma et la clé d’idempotence. Les événements conformes sont ensuite publiés par lots de 500 dans Kinesis avec `source_customer_id` comme clé de partition.
 
-Les événements comprennent des achats, des consultations de fiches produit et des ajouts au panier. La clé de partition logique est `customer_id`, afin de conserver l’ordre des événements d’un même client. `event_id` sert de clé d’idempotence pour éviter les doublons lors d’une reprise.
+Cette clé conserve l’ordre du parcours dans un système source. La résolution vers le Golden Record intervient après ingestion. Dix enregistrements sont relus depuis le shard afin de vérifier que le flux n’est pas seulement déclaré mais utilisable.
 
-## 5. Fonctionnement du pipeline
+### 4.4 Modèle de référence
 
-### 5.1 Génération et ingestion
+Le pipeline Python/SQLite fournit un oracle simple, rapide et indépendant de dbt. Il construit huit tables cœur, calcule les KPI, exécute 24 contrôles et écrit un rapport JSON. Cette double implémentation permet de comparer les résultats au lieu de faire dépendre toutes les preuves du même moteur.
 
-Je génère un jeu de données déterministe avec une graine fixe. Cela permet de rejouer la démonstration et d’obtenir les mêmes résultats. Dans la cible cloud, Airbyte collecte les sources SaaS et les fichiers métiers, tandis que Kinesis ingère les événements e-commerce et POS à haute fréquence.
+### 4.5 Transformation dbt
 
-### 5.2 Validation à l’entrée
+`src/dbt_runner.py` crée huit vues Raw persistantes dans DuckDB, puis lance le vrai exécutable dbt. Le résumé est calculé depuis `target/run_results.json`, pas depuis une valeur codée dans l’interface.
 
-Une fonction Lambda représentative décode chaque événement, vérifie les champs obligatoires, contrôle le timestamp et enrichit le message avec une version de schéma et une clé d’idempotence. Les événements invalides sont marqués en erreur pour pouvoir être orientés vers une dead-letter queue.
+Le projet dbt comprend :
 
-### 5.3 Modélisation
+- 8 modèles staging typés ;
+- 1 modèle intermédiaire de résolution d’identité ;
+- 10 modèles métier ;
+- 78 tests génériques, singuliers et unitaires ;
+- 1 snapshot SCD2 sur l’état du stock.
 
-Je sépare les dimensions et les faits :
+Les faits de ventes et d’événements sont incrémentaux avec une stratégie `merge`. Les clés `order_id` et `event_id` rendent les reprises idempotentes.
 
-- `dim_product` décrit les produits et leurs hiérarchies ;
-- `dim_customer` porte le Golden Record client pseudonymisé ;
-- `dim_product_price_scd2` conserve l’historique des prix ;
-- `fact_sales` contient les commandes omnicanales ;
-- `fact_inventory` calcule les stocks et le risque de rupture ;
-- `fact_retail_event` conserve les événements streaming de tous les canaux.
+## 5. Orchestration Airflow
 
-Les modèles dbt montrent une couche staging typée et dédupliquée, puis des marts incrémentaux. La stratégie `merge` et la clé `order_id` rendent les reprises idempotentes.
+Le DAG `retail_core_daily` exécute six tâches dans un ordre strict :
 
-### 5.4 Orchestration
+```text
+extract_sources_task
+  → stage_local_aws_task
+  → build_reference_warehouse_task
+  → dbt_build_task
+  → reconcile_platform_task
+  → publish_kpis_task
+```
 
-Le DAG Airflow `retail_core_daily` enchaîne l’extraction, les contrats de données, les transformations dbt, la réconciliation et la publication. Deux retries sont configurés avec cinq minutes d’intervalle. La publication n’est autorisée que si les contrôles sont conformes et si l’écart batch/streaming est nul.
+Paramètres opérationnels :
 
-## 6. KPI présentés
-
-| KPI | Définition | Utilité métier |
+| Paramètre | Valeur | Justification |
 |---|---|---|
-| Chiffre d’affaires | Somme de `quantité × prix unitaire` | Piloter la performance commerciale |
-| Commandes | Nombre d’ordres uniques | Mesurer le volume d’activité |
-| Panier moyen | Chiffre d’affaires / commandes | Suivre la valeur moyenne d’achat |
-| Clients actifs | Clients distincts ayant commandé | Mesurer la base réellement engagée |
-| ATP | Magasin + entrepôt + entrant - réservé - vendu | Promettre un stock réellement disponible |
-| Risque de rupture | ATP comparé au stock de sécurité | Prioriser les réapprovisionnements |
-| Latence p95 | 95 % des événements reçus sous ce délai | Contrôler le SLA quasi temps réel |
-| Score qualité | Tests réussis / tests exécutés | Décider si les données sont publiables |
-| Écart batch/stream | Unités batch - unités Kinesis | Garantir la précision comptable |
-| Coût mensuel | Compute + streaming + orchestration + stockage | Prévenir une dérive de facture cloud |
+| Planification | 05:15 Europe/Paris | marge avant le SLA de 08:00 |
+| Retries | 2 | absorber une indisponibilité temporaire |
+| Délai de retry | 5 minutes | éviter une boucle agressive |
+| Runs actifs | 1 maximum | prévenir les écritures concurrentes |
+| Catchup | désactivé | démonstration quotidienne contrôlée |
 
-## 7. Calcul de l’ATP
+Chaque tâche appelle une fonction réutilisable de `src/orchestration.py`. Je peux donc la tester hors Airflow, puis vérifier le même chemin dans Airflow. Le publishing gate agrège les statuts du modèle Python, de dbt et du profil AWS activé.
 
-La disponibilité à la vente est calculée ainsi :
+## 6. Modèle de données
+
+### Dimensions
+
+- `dim_product` : produit, catégorie, département, collection et prix courant ;
+- `dim_customer` : Golden Record pseudonymisé et nombre d’identités résolues ;
+- `dim_product_price_scd2` : historique des prix avec périodes non chevauchantes.
+
+### Faits
+
+- `fct_sales` : une commande omnicanale ;
+- `fct_payments` : une transaction ;
+- `fct_payment_reconciliation` : comparaison commande par commande ;
+- `fct_retail_event` : un événement enrichi du client canonique ;
+- `fct_available_to_promise` : disponibilité et niveau de risque par produit.
+
+### Marts de décision
+
+- `mart_customer_rfm` calcule récence, fréquence, montant, scores quartiles et segment ;
+- `mart_repricing_candidates` combine demande, ATP, couverture, remise et prix réalisé pour produire une action explicable.
+
+## 7. KPI et règles métier
+
+| KPI | Définition | Décision soutenue |
+|---|---|---|
+| Chiffre d’affaires | somme de `sales_amount` | piloter la performance |
+| Commandes | nombre d’`order_id` | mesurer l’activité |
+| Panier moyen | CA / commandes | suivre la valeur d’achat |
+| Clients actifs | clients distincts ayant commandé | mesurer l’engagement |
+| ATP | magasin + entrepôt + entrant - réservé - vendu | éviter la survente |
+| Risque de rupture | ATP comparé au stock de sécurité | prioriser le réassort |
+| Latence p95 | 95 % des événements sous le seuil | suivre le SLA streaming |
+| Écart unités | batch - achats Kinesis | garantir l’exhaustivité |
+| Écart paiements | ventes - paiements soldés | garantir le chiffre encaissé |
+| Score qualité | contrôles réussis / exécutés | ouvrir ou fermer la publication |
+
+### Available to Promise
 
 ```text
 ATP = stock magasin + stock entrepôt + réapprovisionnement entrant
       - réservations - unités vendues
 ```
 
-Je compare ensuite l’ATP au stock de sécurité :
-
 - `critical` si l’ATP est inférieur au stock de sécurité ;
-- `watch` s’il est inférieur à deux fois le stock de sécurité ;
-- `healthy` dans les autres cas.
+- `watch` s’il est inférieur à deux fois ce seuil ;
+- `healthy` sinon.
 
-Ce calcul sert à éviter la survente, à mieux informer le client et à prioriser les actions supply chain.
+### Repricing
 
-## 8. Customer 360
+La recommandation reste volontairement lisible :
 
-Le Customer 360 réconcilie les comportements web, magasin et marketplace. Les emails ne sont jamais stockés en clair : je conserve uniquement un hash SHA-256 tronqué dans ce démonstrateur. Le loyalty ID, le pays, le canal d’acquisition et le consentement marketing complètent le Golden Record.
+- `protect_margin` : +3 % si la demande est élevée et l’ATP critique ;
+- `accelerate_sell_through` : -5 % si la couverture est forte et la demande faible ;
+- `hold` : maintien du prix dans les autres cas.
 
-Une segmentation RFM simplifiée classe les clients en Champions, Fidèles, Prometteurs et Nouveaux selon leur montant et leur fréquence d’achat. Cette vue peut alimenter des campagnes CRM sans exposer les données personnelles dans les marts analytiques.
+Un test singulier interdit toute recommandation en dehors de ces garde-fous. Ce mart fournit une base contrôlable ; il ne prétend pas remplacer un moteur de pricing ou une validation métier.
 
-## 9. Qualité et gouvernance
+### RFM
 
-Le publishing gate exécute seize contrôles :
+La récence, la fréquence et le montant sont chacun scorés de 1 à 4 avec des quartiles. La somme et la combinaison des scores produisent les segments `champions`, `loyal`, `promising`, `at_risk` et `developing`.
 
-- unicité des commandes et événements ;
-- intégrité des références produit et client ;
-- quantités, montants et remises dans les domaines autorisés ;
-- égalité du nombre, des identifiants et des unités d’achat entre batch et streaming ;
-- cohérence de la clé de partition avec le client ;
-- forme hexadécimale des hashes d’email ;
-- unicité de la version courante, validité ouverte et non-chevauchement des périodes SCD2 ;
+## 8. Qualité et gouvernance
+
+Les 24 contrôles Python couvrent :
+
+- unicité des commandes, événements, paiements et identités ;
+- intégrité produit, identité et paiement ;
+- quantités, montants et taux de remise ;
+- égalité du nombre, des identifiants et des unités entre batch et flux ;
+- cohérence des clés de partition ;
+- un paiement soldé par commande et égalité des montants ;
+- format des hashes d’email ;
+- version courante et périodes SCD2 ;
 - fraîcheur du dernier événement.
 
-Une seule erreur critique bloque le pipeline avant publication. Le rapport est écrit au format JSON afin d’être exploitable par Airflow, CloudWatch, une CI/CD ou un outil d’observabilité.
+dbt réexécute des garanties au plus près des modèles : contraintes de clés, relations, valeurs acceptées, ATP non négatif, identité complète, paiements exacts, batch/stream exact et prix recommandé borné.
 
-## 10. Simulation Black Friday
+Une seule non-conformité ferme le publishing gate. La publication n’est donc jamais un simple effet visuel du dashboard.
 
-Le cockpit permet de multiplier une hypothèse nominale de 42 événements par seconde de 2 à 12. Le modèle estime le débit, le nombre d’unités de capacité, la latence p95 et le surcoût avec 25 % de marge. Il conserve l’invariant de réconciliation à zéro.
+## 9. AWS local et infrastructure cible
 
-Cette fonctionnalité sert à montrer une démarche de capacity planning : je ne cherche pas uniquement à traiter plus de volume, je vérifie aussi la qualité et le coût. Il s’agit d’une estimation déterministe, pas d’un test de charge distribué ni d’un trafic réellement envoyé vers AWS.
+Le profil LocalStack appelle les mêmes SDK et formes d’API que la cible pour :
 
-## 11. FinOps
+- créer un bucket et charger les partitions Raw ;
+- créer un stream Kinesis et écrire les événements ;
+- relire des messages depuis un shard ;
+- publier trois métriques CloudWatch ;
+- créer une alarme et un log de pipeline.
 
-Le dashboard présente un scénario cible basé sur 3,2 millions d’événements mensuels. Les composants totalisent exactement 486,70 €, le coût unitaire est recalculé à 0,15 € par millier d’événements et la prévision est comparée à un budget de 650 €. Ces valeurs forment un modèle pédagogique cohérent, pas une facture cloud. Les optimisations prévues sont :
+Terraform décrit la cible AWS avec :
 
-- auto-suspend des warehouses Snowflake ;
-- modèles dbt incrémentaux pour limiter les scans ;
-- right-sizing de la mémoire Lambda ;
-- lifecycle S3 vers des classes moins coûteuses ;
-- scaling temporaire des shards Kinesis pendant les pics.
+- bucket S3 privé, versionné, chiffré et lifecycle ;
+- stream Kinesis chiffré et métriques par shard ;
+- fonction Lambda Python 3.12 ;
+- rôle et politique IAM à privilèges limités ;
+- rétention des logs et alarmes CloudWatch.
 
-## 12. Cockpit interactif
+Snowflake est traité honnêtement comme la cible de warehouse : un profil dbt d’exemple utilise uniquement des variables d’environnement. L’exécution de démonstration reste sur DuckDB.
 
-L’application comprend sept vues :
+## 10. Cockpit interactif
 
-1. **Vue d’ensemble** : performance, mix canal, catégories et réconciliation.
-2. **Temps réel** : événements Kinesis, latence, achats et résilience.
-3. **Stock & ATP** : disponibilité détaillée et recherche produit.
-4. **Customer 360** : Golden Records, RFM, consentements et canaux.
-5. **Pipeline & Ops** : télémétrie réelle du run local et architecture cloud cible séparée.
-6. **Qualité & SCD2** : publishing gate et historique des prix.
-7. **FinOps** : scénario de coût, hypothèses, budget, prévision et capacité Black Friday.
+Le cockpit sombre et responsive propose sept vues :
 
-Les filtres de canal et de période recalculent les KPI depuis l’API. L’interface propose un mode sombre ou clair, une navigation responsive et une simulation interactive.
+1. performance commerciale et mix omnicanal ;
+2. événements, latence et résilience ;
+3. ATP, risque et export stock ;
+4. Customer 360, consentement et segmentation ;
+5. preuves Airflow/dbt/AWS et architecture cible ;
+6. qualité, double rapprochement et SCD2 ;
+7. FinOps et simulation Black Friday.
 
-## 13. Exécution locale
+Les filtres de canal et de période recalculent ventes, événements, clients, séries et rapprochements sur le même périmètre. La version GitHub Pages embarque les combinaisons nécessaires pour conserver cette interaction sans backend.
 
-```bash
-python3 run_demo.py
-python3 serve.py
-```
+## 11. FinOps et capacité
 
-Le cockpit est ensuite disponible sur `http://127.0.0.1:8042`.
+Le scénario FinOps est un modèle pédagogique explicite, jamais présenté comme une facture. Il additionne compute, streaming, orchestration et stockage, puis le compare à un budget.
 
-## 14. Exécution Docker
+La simulation Black Friday applique un multiplicateur de 2 à 12 à une hypothèse nominale de 42 événements par seconde. Elle estime la capacité avec 25 % de marge, la latence p95 et le surcoût, tout en conservant l’invariant de rapprochement. Aucun trafic cloud réel n’est lancé par cette simulation.
 
-```bash
-docker compose up --build -d
-```
+## 12. Exécution
 
-Le conteneur :
-
-1. utilise une image Python 3.13 minimale ;
-2. génère les données et construit le warehouse pendant le build ;
-3. exécute les tests automatisés ;
-4. expose l’application sur le port 8042 ;
-5. publie un healthcheck sur `/api/health`.
-
-Pour arrêter l’application :
+### Cockpit
 
 ```bash
-docker compose down
+docker compose up --build -d retail-core
 ```
 
-## 15. Tests et reproductibilité
-
-Les tests vérifient que la qualité et la réconciliation sont conformes, que les séries et les graphiques retombent sur les KPI, que les filtres s’appliquent aux ventes et aux événements, que le p95 est réellement calculé, que l’historique SCD2 contient deux versions par produit, que chaque ATP respecte sa formule et que le modèle FinOps est arithmétiquement cohérent.
+### Plateforme complète
 
 ```bash
-python3 -m unittest discover -s tests -v
+docker compose --profile platform up --build -d
+make airflow-test
 ```
 
-Le Dockerfile réexécute automatiquement ces tests pendant la construction de l’image. Une image qui échoue aux tests n’est donc pas produite.
+### Contrôles ciblés
 
-## 16. Correspondance avec un poste Data Engineer Retail
+```bash
+make test
+make dbt-docker
+make aws-local
+make terraform-validate
+```
 
-| Attente de la mission | Preuve dans le projet |
+Les points d’accès sont `8042` pour le cockpit, `8080` pour Airflow et `4566` pour les API AWS locales.
+
+## 13. Rapports produits
+
+| Rapport | Contenu |
 |---|---|
-| Ingestion Airbyte | Sources CRM, ERP, PLM et supply représentées |
-| AWS Lambda | Validation et enrichissement des événements |
-| Amazon Kinesis | Flux d’achat, consultation et panier |
-| Snowflake / Databricks | Warehouse dimensionnel transposable |
-| dbt | Staging, marts incrémentaux, documentation et tests |
-| SCD | Historisation SCD Type 2 des prix |
-| Airflow | DAG, retries, dépendances et publishing gate |
-| Qualité | Seize contrôles et réconciliation comptable filtrée |
-| Retail Core | Produit, omnicanalité, ATP et Customer 360 |
-| FinOps | Budget, prévision et optimisation du compute |
-| Product-oriented | Chaque traitement répond à une décision métier |
+| `quality_report.json` | 24 contrôles, KPI, phases et rapprochements |
+| `airbyte_source_report.json` | catalogue, volumes et schémas des huit flux |
+| `aws_local_report.json` | objets S3, événements Kinesis, validation et métriques |
+| `dbt_run_report.json` | résultat lu depuis `run_results.json` |
+| `platform_reconciliation.json` | décision globale du publishing gate |
+| `publish_manifest.json` | artefacts publiés et SLA |
 
-## 17. Choix et limites assumées
+Ces fichiers sont des artefacts d’exécution locaux et ne sont pas versionnés. La version statique du cockpit embarque uniquement les valeurs utiles à la démonstration.
 
-SQLite et les fichiers locaux remplacent les services cloud afin de permettre une démonstration gratuite et reproductible. Le code dbt, le DAG Airflow et la Lambda montrent la transposition cible, mais le projet ne provisionne pas réellement un compte AWS ou Snowflake.
+## 14. Tests et CI
 
-Pour une mise en production, j’ajouterais Terraform, un registre de schémas, une dead-letter queue, des secrets gérés par AWS Secrets Manager, une CI/CD, des tests de charge distribués et une politique de rétention conforme au RGPD.
+La suite rapide vérifie le pipeline, les règles métier, les filtres et graphiques, la formule ATP, le modèle de coût, la source Airbyte-compatible, le handler Lambda, le contrat du DAG et les ressources Terraform. La CI ajoute le `dbt build` complet, le formatage/validation Terraform et la génération du site statique.
 
-## 18. Présentation orale
+Cette séparation garde les tests unitaires rapides tout en conservant une preuve d’intégration plus complète.
 
-> J’ai construit un Retail Core Lakehouse qui réunit les ventes web, magasin et marketplace avec les données clients, produits et stocks. Le pipeline gère 960 ventes et plus de 3 000 événements simulés, calcule l’ATP, historise les prix en SCD Type 2 et réconcilie le streaming avec le batch. Avant toute publication, seize contrôles constituent un publishing gate. J’ai également ajouté un cockpit interactif, un modèle de capacité Black Friday et un scénario FinOps explicite. La version locale utilise SQLite pour rester démontrable gratuitement, mais les frontières techniques sont directement transposables vers S3, Lambda, Kinesis, Snowflake, dbt et Airflow.
+## 15. Limites assumées
 
-## 19. Ce que ce projet démontre
+- LocalStack émule AWS ; il ne reproduit pas toutes les contraintes d’un compte de production.
+- DuckDB exécute dbt localement ; Snowflake reste à connecter avec des secrets et un réseau réels.
+- La source Airbyte-compatible lit des fichiers synthétiques ; les connecteurs CRM/ERP réels nécessitent leurs API et leur authentification.
+- La simulation de capacité n’est pas un test de charge distribué.
+- Le repricing fournit une recommandation contrôlée, pas une décision automatique de mise en rayon.
 
-Ce projet montre que je sais relier architecture, code et besoin métier. Je ne me contente pas de déplacer des données : je définis leur grain, leur qualité, leur cycle de vie, leur coût et leur utilité pour le retail. Mon approche est orientée produit, observable et conçue pour évoluer vers une plateforme cloud industrialisée.
+Ces limites sont visibles et documentées. Elles permettent de démontrer les choix techniques sans inventer une exploitation cloud qui n’a pas eu lieu.
+
+## 16. Passage en production
+
+Pour industrialiser la plateforme, je connecterais les sources réelles, isolerais les environnements AWS, stockerais les secrets dans un gestionnaire dédié, brancherais dbt sur Snowflake, déploierais Airflow sur MWAA ou une plateforme supervisée, puis ajouterais DLQ, registry de schémas, alerting, tests de charge et procédures d’astreinte.
+
+La logique métier, les modèles, les contrôles et l’ordre du DAG resteraient stables. Le projet démontre ainsi non seulement une architecture, mais une trajectoire d’industrialisation réaliste.
+
+## 17. Synthèse personnelle
+
+J’ai voulu montrer que je sais relier architecture cloud, SQL, Python et enjeux retail. Je ne déplace pas seulement des données : je définis ce qu’elles représentent, comment elles sont rapprochées, quand elles peuvent être publiées et comment prouver que le résultat est fiable.

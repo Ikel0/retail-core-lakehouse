@@ -4,7 +4,13 @@ import base64
 import json
 from datetime import datetime
 
-REQUIRED_FIELDS = {"event_id", "event_type", "customer_id", "product_id", "event_at"}
+REQUIRED_FIELDS = {
+    "event_id",
+    "event_type",
+    "source_customer_id",
+    "product_id",
+    "event_at",
+}
 
 
 def _validate(payload: dict) -> dict:

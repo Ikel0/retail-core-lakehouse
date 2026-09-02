@@ -1,0 +1,8 @@
+retail_core:
+  target: local
+  outputs:
+    local:
+      type: duckdb
+      path: "{{ env_var('RETAIL_CORE_DUCKDB_PATH', 'data/retail_core.duckdb') }}"
+      schema: analytics
+      threads: 1
