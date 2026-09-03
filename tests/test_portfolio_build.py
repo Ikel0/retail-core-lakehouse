@@ -14,6 +14,10 @@ class PortfolioBuildTests(unittest.TestCase):
         for dashboard in dashboards.values():
             self.assertEqual(dashboard["reconciliation"]["delta"], 0)
             self.assertEqual(dashboard["quality"]["status"], "PASS")
+            self.assertEqual(
+                sum(item["selected_units_sold"] for item in dashboard["inventory"]),
+                dashboard["kpis"]["units"],
+            )
 
     def test_all_capacity_steps_are_embedded(self):
         simulations = self.payload["simulations"]

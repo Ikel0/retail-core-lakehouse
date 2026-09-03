@@ -8,6 +8,10 @@ const viewTitles = {
   quality: "Qualité & SCD2",
   costs: "FinOps",
 };
+const globalViewScopes = {
+  pipeline: { pill: "RUN COMPLET", status: "Run complet · filtres non applicables" },
+  costs: { pill: "SCÉNARIO GLOBAL", status: "Scénario global · filtres non applicables" },
+};
 const colors = ["#ff7657", "#57d3e8", "#9f8cff", "#b8f36b", "#ffb85c", "#f573ae", "#6e91ff"];
 const root = document.querySelector("#view-root");
 const euro = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
@@ -18,6 +22,37 @@ const icon = (name) => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"})[char]);
 const dateShort = value => new Date(value).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" });
 const timeShort = value => new Date(value).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+
+function activeScopeLabel() {
+  const channel = document.querySelector("#channel-filter");
+  const channelLabel = channel?.selectedOptions?.[0]?.textContent || "Tous les canaux";
+  return `${channelLabel} · ${state.period} jours`;
+}
+
+function updateScopeUi() {
+  const globalScope = globalViewScopes[state.view];
+  const scopeMode = document.querySelector("#scope-mode");
+  const scopeStatus = document.querySelector("#scope-status");
+  const contextualStatus = {
+    inventory: `Demande filtrée · ${activeScopeLabel()}`,
+    customers: `Clients filtrés · ${activeScopeLabel()}`,
+    quality: `Rapprochement filtré · ${activeScopeLabel()}`,
+  };
+
+  document.querySelectorAll(".select-wrap").forEach(control => {
+    control.hidden = Boolean(globalScope);
+  });
+  scopeMode.hidden = !globalScope;
+  document.querySelector("#scope-mode-text").textContent = globalScope?.pill || "Périmètre global";
+  scopeStatus.querySelector("b").textContent = globalScope?.status
+    || contextualStatus[state.view]
+    || `Périmètre actif · ${activeScopeLabel()}`;
+  scopeStatus.classList.toggle("global", Boolean(globalScope));
+  document.querySelector("#refresh-data").setAttribute(
+    "aria-label",
+    globalScope ? `Actualiser · ${globalScope.pill.toLowerCase()}` : `Actualiser les données · ${activeScopeLabel()}`,
+  );
+}
 
 function showToast(message) {
   const toast = document.querySelector("#toast");
@@ -103,7 +138,7 @@ function reconciliation(data) {
 function renderOverview() {
   const d = state.data, k = d.kpis;
   root.innerHTML = hero("RETAIL CORE · SINGLE SOURCE OF TRUTH", "Le retail en un seul regard", "Ventes synthétiques omnicanales, disponibilité stock et fiabilité du pipeline sur la sélection active.", `<button type="button" class="subtle-button" data-view-jump="pipeline">Voir l’architecture</button><button type="button" class="subtle-button accent" data-open-sim>Scénario Black Friday</button>`)
-    + `<div class="kpi-grid">${kpi("Chiffre d’affaires", euro.format(k.revenue || 0), `${d.meta.period} derniers jours`, "var(--coral)", "stream", `${integer.format(k.customers || 0)} clients actifs`)}${kpi("Commandes", integer.format(k.orders || 0), `${integer.format(k.units || 0)} articles`, "var(--cyan)", "box", `Panier moyen ${euro.format(k.avg_basket || 0)}`)}${kpi("Stock disponible · ATP", integer.format(k.total_atp || 0), "snapshot réseau complet", "var(--lime)", "box", `${integer.format(d.inventory.length)} références suivies`)}${kpi("Qualité des données", `${k.quality_score}%`, `${d.quality.passed}/${d.quality.total} contrôles`, "var(--violet)", "shield", d.quality.status === "PASS" ? "Publication autorisée" : "Publication bloquée")}</div>`
+    + `<div class="kpi-grid">${kpi("Chiffre d’affaires", euro.format(k.revenue || 0), `${d.meta.period} derniers jours`, "var(--coral)", "stream", `${integer.format(k.customers || 0)} clients actifs`)}${kpi("Commandes", integer.format(k.orders || 0), `${integer.format(k.units || 0)} articles`, "var(--cyan)", "box", `Panier moyen ${euro.format(k.avg_basket || 0)}`)}${kpi("Stock disponible · ATP", integer.format(k.total_atp || 0), "hors filtres de vente", "var(--lime)", "box", `${integer.format(d.inventory.length)} références · snapshot courant`)}${kpi("Qualité des données", `${k.quality_score}%`, "run complet · hors filtres", "var(--violet)", "shield", d.quality.status === "PASS" ? "Publication autorisée" : "Publication bloquée")}</div>`
     + `<div class="dashboard-grid">${panel("Performance commerciale", "Chiffre d’affaires quotidien · filtre actif", lineChart(d.series), 8, `<div class="legend"><span><i></i>CA sélectionné</span></div>`)}${panel("Mix des canaux", "Contribution dans la même sélection", donut(d.channel_mix), 4)}${panel("Catégories motrices", "Top 7 catégories par chiffre d’affaires", categoryBars(d.categories), 5)}${panel("Double réconciliation", `Batch / Kinesis et ventes / paiements · ${d.meta.scope}`, reconciliation(d.reconciliation), 7, `<span class="badge ${d.reconciliation.status === "PASS" ? "pass" : "critical"}">${d.reconciliation.status === "PASS" ? "2 INVARIANTS EXACTS" : "ÉCART DÉTECTÉ"}</span>`)}</div>`;
   bindChartTooltips();
   bindInlineActions();
@@ -119,18 +154,21 @@ function renderRealtime() {
 }
 
 function inventoryTable(items) {
-  return `<div class="data-table-wrap"><table class="data-table"><thead><tr><th>Produit</th><th>Catégorie</th><th>Magasins</th><th>Entrepôt</th><th>Réservé</th><th>Entrant</th><th>ATP</th><th>Risque</th></tr></thead><tbody id="inventory-body">${items.map(item => `<tr data-search="${escapeHtml(`${item.name} ${item.category} ${item.risk_level}`.toLowerCase())}"><td><div class="product-cell"><span class="product-icon">${item.product_id.slice(-2)}</span><strong>${escapeHtml(item.name)}</strong></div></td><td>${escapeHtml(item.category)}</td><td>${integer.format(item.store_stock)}</td><td>${integer.format(item.warehouse_stock)}</td><td>${integer.format(item.reserved)}</td><td>${integer.format(item.incoming)}</td><td class="atp-cell"><div class="atp-value"><strong>${integer.format(item.atp)}</strong><span>seuil ${item.safety_stock}</span></div><div class="table-meter"><i class="${item.risk_level}" style="width:${Math.min(100, item.atp / 1600 * 100)}%"></i></div></td><td><span class="badge ${item.risk_level}">${item.risk_level.toUpperCase()}</span></td></tr>`).join("")}</tbody></table></div>`;
+  return `<div class="data-table-wrap"><table class="data-table"><thead><tr><th>Produit</th><th>Catégorie</th><th>Ventes sélection</th><th>Magasins</th><th>Entrepôt</th><th>Réservé</th><th>Entrant</th><th>ATP</th><th>Risque</th></tr></thead><tbody id="inventory-body">${items.map(item => `<tr data-search="${escapeHtml(`${item.name} ${item.category} ${item.risk_level}`.toLowerCase())}"><td><div class="product-cell"><span class="product-icon">${item.product_id.slice(-2)}</span><strong>${escapeHtml(item.name)}</strong></div></td><td>${escapeHtml(item.category)}</td><td><strong>${integer.format(item.selected_units_sold || 0)}</strong></td><td>${integer.format(item.store_stock)}</td><td>${integer.format(item.warehouse_stock)}</td><td>${integer.format(item.reserved)}</td><td>${integer.format(item.incoming)}</td><td class="atp-cell"><div class="atp-value"><strong>${integer.format(item.atp)}</strong><span>seuil ${item.safety_stock}</span></div><div class="table-meter"><i class="${item.risk_level}" style="width:${Math.min(100, item.atp / 1600 * 100)}%"></i></div></td><td><span class="badge ${item.risk_level}">${item.risk_level.toUpperCase()}</span></td></tr>`).join("")}</tbody></table></div>`;
 }
 
 function renderInventory() {
   const d = state.data, items = d.inventory;
   const watch = items.filter(item => item.risk_level === "watch").length;
   const critical = items.filter(item => item.risk_level === "critical").length;
-  const incoming = items.reduce((sum, item) => sum + item.incoming, 0);
+  const totalAtp = items.reduce((sum, item) => sum + item.atp, 0);
+  const selectedUnits = items.reduce((sum, item) => sum + Number(item.selected_units_sold || 0), 0);
+  const dailyDemand = selectedUnits / d.meta.period;
+  const coverageDays = dailyDemand > 0 ? Math.round(totalAtp / dailyDemand) : null;
   const toolbar = `<div class="table-tools"><label class="search-box">${icon("search")}<input id="inventory-search" type="search" placeholder="Rechercher un produit…" /></label></div>`;
-  root.innerHTML = hero("SUPPLY CHAIN · AVAILABLE TO PROMISE", "Le bon stock, au bon moment", "ATP = stock initial + entrant − réservé − unités vendues dans le jeu de démonstration.", `<button type="button" class="subtle-button" id="export-inventory">Exporter le snapshot CSV</button>`)
-    + `<div class="kpi-grid">${kpi("ATP réseau", integer.format(items.reduce((s,i)=>s+i.atp,0)), "unités vendables", "var(--lime)", "box", "Snapshot consolidé")}${kpi("Sous surveillance", integer.format(watch), "références", "var(--warning)", "shield", "ATP < 2 × seuil")}${kpi("Risque de rupture", integer.format(critical), "références critiques", "var(--danger)", "shield", critical ? "Action requise" : "Aucune alerte")}${kpi("Réapprovisionnement", integer.format(incoming), "unités entrantes", "var(--cyan)", "stream", "Flux déclaré")}</div>`
-    + `<div class="dashboard-grid">${panel("Disponibilité détaillée", "Référentiel produit enrichi du calcul ATP", inventoryTable(items), 12, toolbar)}</div>`;
+  root.innerHTML = hero("SUPPLY CHAIN · AVAILABLE TO PROMISE", "Le bon stock, au bon moment", "Le stock physique reste un instantané réseau. Le canal et la période filtrent la demande observée et recalculent la couverture associée.", `<button type="button" class="subtle-button" id="export-inventory">Exporter le snapshot CSV</button>`)
+    + `<div class="kpi-grid">${kpi("ATP réseau", integer.format(totalAtp), "indépendant des ventes filtrées", "var(--lime)", "box", "Snapshot stock courant")}${kpi("Demande sélectionnée", integer.format(selectedUnits), activeScopeLabel(), "var(--coral)", "stream", "Unités vendues")}${kpi("Couverture estimée", coverageDays === null ? "—" : `${integer.format(coverageDays)} j`, "au rythme de la sélection", "var(--cyan)", "bolt", activeScopeLabel())}${kpi("Risque de rupture", integer.format(critical), `${integer.format(watch)} sous surveillance`, "var(--danger)", "shield", critical ? "Action requise" : "Aucune alerte")}</div>`
+    + `<div class="dashboard-grid">${panel("Disponibilité détaillée", `Stock courant et demande sur ${activeScopeLabel()}`, inventoryTable(items), 12, toolbar)}</div>`;
   bindTableSearch("#inventory-search", "#inventory-body");
   document.querySelector("#export-inventory").addEventListener("click", exportInventory);
 }
@@ -146,7 +184,7 @@ function renderCustomers() {
   const toolbar = `<div class="table-tools"><label class="search-box">${icon("search")}<input id="customer-search" type="search" placeholder="ID, pays ou segment…" /></label></div>`;
   const privacyPassed = d.quality.checks.some(check => check.name === "privacy.email_hash_shape" && check.status === "PASS");
   root.innerHTML = hero("CRM + WEB + POS · IDENTITY RESOLUTION", "Une identité client unifiée", "Les comportements sont rapprochés sans exposer d’email : le modèle analytique ne conserve qu’un hash et des identifiants métier.")
-    + `<div class="kpi-grid">${kpi("Clients actifs", integer.format(d.kpis.customers), `${d.meta.period} jours`, "var(--violet)", "users", "Golden records filtrés")}${kpi("Profils affichés", integer.format(customers.length), "classés par valeur", "var(--cyan)", "users", "Top analytique")}${kpi("Omnicanaux", integer.format(omnichannel), "parmi les profils affichés", "var(--cyan)", "stream", "Plusieurs canaux")}${kpi("Protection PII", privacyPassed ? "100%" : "À corriger", "hashes contrôlés", "var(--lime)", "shield", privacyPassed ? "Contrat validé" : "Publication bloquée")}</div>`
+    + `<div class="kpi-grid">${kpi("Clients actifs", integer.format(d.kpis.customers), activeScopeLabel(), "var(--violet)", "users", "Golden records filtrés")}${kpi("Profils affichés", integer.format(customers.length), "classés par valeur", "var(--cyan)", "users", "Top analytique")}${kpi("Omnicanaux", integer.format(omnichannel), "parmi les profils affichés", "var(--cyan)", "stream", "Plusieurs canaux")}${kpi("Protection PII", privacyPassed ? "100%" : "À corriger", "hashes contrôlés", "var(--lime)", "shield", privacyPassed ? "Contrat validé" : "Publication bloquée")}</div>`
     + `<div class="dashboard-grid">${panel("Segmentation RFM", "Répartition des profils affichés", donut(segments, "PROFILS"), 4)}${panel("Customer 360 · Golden Records", `Top ${customers.length} sur ${integer.format(d.kpis.customers)} clients actifs`, customerTable(customers), 8, toolbar)}</div>`;
   bindTableSearch("#customer-search", "#customer-body");
 }
@@ -179,7 +217,7 @@ function renderQuality() {
   const scd = `<div class="scd-timeline">${d.price_scd.map(item => `<div class="scd-item ${item.is_current ? "current" : ""}"><strong>${escapeHtml(item.name)}</strong><b>${Number(item.price).toFixed(2)} €</b><span>${item.valid_from} → ${item.valid_to === "9999-12-31" ? "actuel" : item.valid_to}</span><span class="badge ${item.is_current ? "pass" : "warn"}">${item.is_current ? "CURRENT" : "HISTORY"}</span></div>`).join("")}</div>`;
   const publishable = q.status === "PASS" && d.reconciliation.status === "PASS";
   root.innerHTML = hero("DATA CONTRACTS · TRUST BY DESIGN", "Des indicateurs auxquels le métier peut croire", "Le publishing gate bloque l’exposition si un contrat ou la réconciliation du périmètre sélectionné échoue.", `<a class="subtle-button" href="/api/quality-report" download="retail-core-quality-report.json">Télécharger le rapport JSON</a>`)
-    + `<div class="kpi-grid">${kpi("Score qualité", `${q.score}%`, `${q.passed}/${q.total} contrôles`, "var(--lime)", "shield", publishable ? "Publishing gate ouvert" : "Publishing gate fermé")}${kpi("Fraîcheur", `${q.freshness_minutes} min`, "dernier événement généré", "var(--cyan)", "stream", "Seuil < 24 h")}${kpi("Double rapprochement", "2 / 2", d.meta.scope, "var(--coral)", "cost", `${d.reconciliation.unit_delta} unité · ${Number(d.reconciliation.amount_delta).toFixed(2)} €`)}${kpi("SCD Type 2", integer.format(d.price_scd.length), "versions chargées", "var(--violet)", "pipeline", `${integer.format(d.inventory.length)} produits × 2 versions`)}</div>`
+    + `<div class="kpi-grid">${kpi("Score qualité", `${q.score}%`, `${q.passed}/${q.total} contrôles`, "var(--lime)", "shield", publishable ? "Publishing gate ouvert" : "Publishing gate fermé")}${kpi("Fraîcheur", `${q.freshness_minutes} min`, "dernier événement généré", "var(--cyan)", "stream", "Seuil < 24 h")}${kpi("Double rapprochement", "2 / 2", activeScopeLabel(), "var(--coral)", "cost", `${d.reconciliation.unit_delta} unité · ${Number(d.reconciliation.amount_delta).toFixed(2)} €`)}${kpi("SCD Type 2", integer.format(d.price_scd.length), "versions chargées", "var(--violet)", "pipeline", `${integer.format(d.inventory.length)} produits × 2 versions`)}</div>`
     + `<div class="dashboard-grid">${panel("Confiance globale", "Qualité avant exposition aux utilisateurs", `<div class="quality-score"><div class="score-ring" style="--score:${q.score}%"><div><strong>${q.score}%</strong><span>TRUST SCORE</span></div></div><div class="quality-copy"><h3>${publishable ? "Prêt pour publication" : "Publication bloquée"}</h3><p>${publishable ? "Tous les contrôles passent et la réconciliation de la sélection est exacte." : "Un contrôle doit être corrigé avant d’exposer les indicateurs."}</p></div></div>`, 5, `<span class="badge ${publishable ? "pass" : "critical"}">${publishable ? "PASS" : "BLOCKED"}</span>`)}${panel("Contrôles automatisés", "Contrats, intégrité, métier, privacy, SCD2 et fraîcheur", checks, 7)}${panel("Historisation des prix · SCD Type 2", "Une version historique et une version courante par produit", scd, 12, `<span>${d.price_scd.length} versions</span>`)}</div>`;
 }
 
@@ -196,19 +234,19 @@ function renderCosts() {
 }
 
 function exportInventory() {
-  const headers = ["product_id", "name", "category", "store_stock", "warehouse_stock", "reserved", "incoming", "units_sold", "safety_stock", "atp", "risk_level"];
+  const headers = ["product_id", "name", "category", "store_stock", "warehouse_stock", "reserved", "incoming", "units_sold", "selected_units_sold", "safety_stock", "atp", "risk_level"];
   const quote = value => `"${String(value ?? "").replaceAll('"', '""')}"`;
   const csv = [headers.join(";"), ...state.data.inventory.map(item => headers.map(key => quote(item[key])).join(";"))].join("\n");
   const blob = new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = "retail-core-inventory.csv";
+  link.download = `retail-core-inventory-${state.channel}-${state.period}d.csv`;
   document.body.append(link);
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-  showToast("Snapshot ATP exporté en CSV");
+  showToast(`Snapshot ATP exporté · ${activeScopeLabel()}`);
 }
 
 function bindTableSearch(inputSelector, bodySelector) {
@@ -249,8 +287,12 @@ async function loadData(showFeedback = false) {
     document.querySelector("#last-run").textContent = new Date(state.data.meta.generated_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
     document.querySelector("#contract-version").textContent = state.data.meta.data_contract;
     document.querySelector("#latency-sla").textContent = `p95 ${integer.format(state.data.kpis.latency_p95_ms)} ms · cible < 3 s`;
+    updateScopeUi();
     render();
-    if (showFeedback) showToast("Données actualisées · qualité validée");
+    if (showFeedback) {
+      const globalScope = globalViewScopes[state.view];
+      showToast(globalScope ? `${globalScope.pill} actualisé` : `Périmètre appliqué · ${activeScopeLabel()}`);
+    }
   } catch (error) {
     if (requestId !== state.requestId) return;
     root.innerHTML = `<div class="error-state"><strong>Le cockpit n’arrive pas à joindre le pipeline.</strong>Lancez <code>python3 run_demo.py</code>, puis <code>python3 serve.py</code>.</div>`;
@@ -269,6 +311,7 @@ function switchView(view) {
   document.querySelectorAll(".nav-item").forEach(item => item.classList.toggle("active", item.dataset.view === view));
   document.querySelector("#sidebar").classList.remove("open");
   document.querySelector("#mobile-menu").setAttribute("aria-expanded", "false");
+  updateScopeUi();
   render();
 }
 
@@ -313,4 +356,5 @@ document.querySelector("#traffic-multiplier").addEventListener("input", event =>
 document.querySelector("#run-simulation").addEventListener("click", runSimulation);
 document.addEventListener("keydown", event => { if (event.key === "Escape") closeSimulation(); });
 
+updateScopeUi();
 loadData();

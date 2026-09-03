@@ -236,7 +236,7 @@ Le cockpit sombre et responsive propose sept vues :
 6. qualité, double rapprochement et SCD2 ;
 7. FinOps et simulation Black Friday.
 
-Les filtres de canal et de période recalculent ventes, événements, clients, séries et rapprochements sur le même périmètre. La version GitHub Pages embarque les combinaisons nécessaires pour conserver cette interaction sans backend.
+Les filtres de canal et de période recalculent ventes, événements, clients, séries, demande stock et rapprochements sur le même périmètre. Le stock physique et l’ATP courant restent un instantané réseau ; la vue Stock & ATP calcule en parallèle les unités vendues dans la sélection et une couverture au rythme observé. Les vues Pipeline & Ops et FinOps assument un périmètre global et masquent donc les filtres métier. La version GitHub Pages embarque les combinaisons nécessaires pour conserver cette interaction sans backend.
 
 ## 11. FinOps et capacité
 

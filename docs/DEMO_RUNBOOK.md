@@ -16,7 +16,7 @@ Je vérifie ensuite :
 - le cockpit sur `http://127.0.0.1:8042` ;
 - Airflow sur `http://127.0.0.1:8080` ;
 - le DAG `retail_core_daily` en succès ;
-- les filtres canal/période et la vue Pipeline & Ops ;
+- les filtres canal/période sur les vues métier et l’indicateur global de Pipeline & Ops ;
 - l’absence d’erreur dans la console du navigateur.
 
 Je garde deux onglets ouverts : le cockpit en premier, Airflow en second. Le dépôt GitHub reste disponible si l’interlocuteur souhaite approfondir le code.
@@ -49,9 +49,9 @@ Je descends sur la carte de réconciliation.
 
 ### 3. Stock & ATP — 50 secondes
 
-Je passe dans **Stock & ATP**, puis je recherche un produit.
+Je passe dans **Stock & ATP**, je change une fois le canal ou la période, puis je recherche un produit.
 
-> L’ATP ne correspond pas au stock physique brut. Je prends le magasin, l’entrepôt et les arrivages, puis je retire les réservations et les unités vendues. Le niveau de risque compare ensuite cet ATP au stock de sécurité. Cette vue sert à éviter la survente et à prioriser le réassort.
+> L’ATP ne correspond pas au stock physique brut. Je prends le magasin, l’entrepôt et les arrivages, puis je retire les réservations et les unités déjà vendues. Le stock courant ne change pas artificiellement avec un filtre analytique. En revanche, la demande sélectionnée et les jours de couverture sont recalculés pour le canal et la période choisis. Le niveau de risque compare ensuite l’ATP au stock de sécurité. Cette séparation évite de mélanger un instantané opérationnel et une fenêtre d’analyse commerciale.
 
 Je peux exporter le snapshot CSV pour montrer l’usage opérationnel.
 
@@ -70,6 +70,8 @@ Je précise que la liste dans GitHub Pages est un replay statique, tandis que le
 ### 6. Pipeline & Ops — 1 minute 30
 
 C’est la partie technique centrale.
+
+Les sélecteurs métier disparaissent sur cette vue et un badge **RUN COMPLET** apparaît : les preuves Airflow, dbt et AWS local portent sur l’exécution complète, pas sur une tranche commerciale. La même règle s’applique au scénario FinOps global.
 
 > Le DAG Airflow 3.3.1 comporte six tâches séquentielles : source, AWS local, modèle de référence, dbt, rapprochement et publication. Il est planifié à 05:15 avec deux retries et un seul run actif, ce qui laisse une fenêtre avant le SLA de 08:00.
 >

@@ -104,6 +104,30 @@ class DashboardConsistencyTest(unittest.TestCase):
         expected_unit_cost = costs["monthly_total"] / (costs["monthly_event_volume"] / 1000)
         self.assertAlmostEqual(costs["cost_per_1k_events"], expected_unit_cost, places=2)
 
+    def test_inventory_combines_fixed_stock_with_filtered_demand(self):
+        all_month = serve.build_dashboard("all", 30)
+        web_week = serve.build_dashboard("web", 7)
+
+        self.assertEqual(
+            sum(item["selected_units_sold"] for item in all_month["inventory"]),
+            all_month["kpis"]["units"],
+        )
+        self.assertEqual(
+            sum(item["selected_units_sold"] for item in web_week["inventory"]),
+            web_week["kpis"]["units"],
+        )
+        self.assertLessEqual(web_week["kpis"]["units"], all_month["kpis"]["units"])
+
+        all_stock = {
+            item["product_id"]: (item["store_stock"], item["warehouse_stock"], item["atp"])
+            for item in all_month["inventory"]
+        }
+        web_stock = {
+            item["product_id"]: (item["store_stock"], item["warehouse_stock"], item["atp"])
+            for item in web_week["inventory"]
+        }
+        self.assertEqual(web_stock, all_stock)
+
     def test_capacity_model_is_explicit_and_bounded(self):
         scenario = serve.simulate_black_friday(5)
         self.assertEqual(scenario["simulated_rps"], 210)

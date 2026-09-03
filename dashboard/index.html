@@ -54,6 +54,7 @@
           <button type="button" class="mobile-menu" id="mobile-menu" aria-label="Ouvrir le menu" aria-expanded="false">☰</button>
           <div class="page-heading"><div class="breadcrumb">RETAIL CORE <b>/</b> DATA PRODUCT DEMO</div><h1 id="page-title">Vue d’ensemble</h1></div>
           <div class="top-actions">
+            <div class="scope-mode" id="scope-mode" hidden><i></i><span id="scope-mode-text">Périmètre global</span></div>
             <label class="select-wrap"><span>Canal</span><select id="channel-filter" aria-label="Canal de vente"><option value="all">Tous les canaux</option><option value="web">E-commerce</option><option value="store">Magasins</option><option value="marketplace">Marketplace</option></select></label>
             <label class="select-wrap"><span>Période</span><select id="period-filter" aria-label="Période d’analyse"><option value="7">7 jours</option><option value="14">14 jours</option><option value="30" selected>30 jours</option></select></label>
             <button type="button" class="primary-button" id="refresh-data" aria-label="Actualiser les données"><span class="pulse-dot"></span><svg class="refresh-icon"><use href="#i-refresh"/></svg><span class="button-label">Actualiser</span></button>
@@ -61,7 +62,7 @@
         </header>
 
         <div class="status-strip">
-          <span><i class="status-ok"></i>Plateforme vérifiée de bout en bout</span><span>Dernier run <b id="last-run">—</b></span><span>Contrat <b id="contract-version">—</b></span><span class="status-right" id="latency-sla">p95 —</span>
+          <span><i class="status-ok"></i>Plateforme vérifiée</span><span class="scope-status" id="scope-status"><i class="scope-dot"></i><b>Périmètre actif · Tous les canaux · 30 jours</b></span><span>Dernier run <b id="last-run">—</b></span><span>Contrat <b id="contract-version">—</b></span><span class="status-right" id="latency-sla">p95 —</span>
         </div>
         <section id="view-root" class="view-root" aria-live="polite"></section>
       </main>
