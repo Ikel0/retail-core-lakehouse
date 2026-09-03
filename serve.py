@@ -156,13 +156,22 @@ def build_dashboard(channel: str = "all", period: int = 30) -> dict:
         )
         inventory = _rows(
             connection.execute(
-                """
+                f"""
+                WITH selected_demand AS (
+                    SELECT s.product_id, SUM(s.quantity) selected_units_sold
+                    FROM fact_sales s {sales_where}
+                    GROUP BY s.product_id
+                )
                 SELECT i.product_id, p.name, p.category, i.store_stock, i.warehouse_stock,
-                       i.reserved, i.incoming, i.safety_stock, i.units_sold, i.atp, i.risk_level
-                FROM fact_inventory i JOIN dim_product p USING(product_id)
+                       i.reserved, i.incoming, i.safety_stock, i.units_sold, i.atp, i.risk_level,
+                       COALESCE(d.selected_units_sold, 0) selected_units_sold
+                FROM fact_inventory i
+                JOIN dim_product p USING(product_id)
+                LEFT JOIN selected_demand d USING(product_id)
                 ORDER BY CASE risk_level WHEN 'critical' THEN 0 WHEN 'watch' THEN 1 ELSE 2 END,
                          atp ASC
-                """
+                """,
+                sales_params,
             )
         )
         customer_rows = _rows(

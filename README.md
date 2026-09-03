@@ -142,7 +142,7 @@ stock magasin + stock entrepôt + entrant - réservations - unités vendues
 
 Les contrôles couvrent l’unicité, les références, les domaines de valeurs, la résolution d’identité, la pseudonymisation, les paiements, la fraîcheur, les partitions Kinesis et les périodes SCD2. Les tests dbt complètent ces contrats au niveau staging et marts, avec notamment des assertions singulières sur l’ATP, les identités et les deux rapprochements.
 
-Le cockpit présente sept angles : performance commerciale, événements, ATP, Customer 360, plateforme, qualité/SCD2 et FinOps. Les filtres canal/période recalculent les KPI et les deux rapprochements sur le même périmètre.
+Le cockpit présente sept angles : performance commerciale, événements, ATP, Customer 360, plateforme, qualité/SCD2 et FinOps. Les filtres canal/période recalculent les ventes, événements, clients, demande stock et rapprochements sur le même périmètre. Le stock physique reste volontairement un instantané réseau ; la vue ATP affiche séparément la demande filtrée et sa couverture estimée. Sur les vues Pipeline & Ops et FinOps, les sélecteurs sont remplacés par un indicateur « périmètre global », car un run complet et un scénario d’infrastructure ne dépendent pas d’un canal de vente.
 
 ## Structure du dépôt
 
