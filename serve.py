@@ -57,40 +57,6 @@ def _percentile(values: list[int], percentile: float) -> int:
     return ordered[min(index, len(ordered) - 1)]
 
 
-def _cost_scenario() -> dict:
-    """Return an internally consistent, explicitly hypothetical FinOps model."""
-    event_volume = 3_200_000
-    budget = 650.0
-    forecast = 512.4
-    baseline = 536.0
-    components = [
-        {"name": "Snowflake compute", "amount": 228.40},
-        {"name": "Kinesis", "amount": 92.20},
-        {"name": "MWAA / Airflow", "amount": 78.10},
-        {"name": "S3 + Lambda", "amount": 88.00},
-    ]
-    monthly_total = round(sum(item["amount"] for item in components), 2)
-    for component in components:
-        component["share"] = round(component["amount"] / monthly_total * 100, 1)
-    return {
-        "kind": "scenario",
-        "monthly_event_volume": event_volume,
-        "monthly_total": monthly_total,
-        "budget": budget,
-        "forecast": forecast,
-        "baseline_without_optimizations": baseline,
-        "savings_percent": round((baseline - monthly_total) / baseline * 100, 1),
-        "forecast_under_budget_percent": round((budget - forecast) / budget * 100, 1),
-        "cost_per_1k_events": round(monthly_total / (event_volume / 1000), 2),
-        "components": components,
-        "assumptions": [
-            "3,2 millions d’événements par mois",
-            "services managés dans une architecture cible",
-            "ordre de grandeur pédagogique, pas une facture fournisseur",
-        ],
-    }
-
-
 def build_dashboard(channel: str = "all", period: int = 30) -> dict:
     if channel not in {"all", "web", "store", "marketplace"}:
         channel = "all"
@@ -191,47 +157,22 @@ def build_dashboard(channel: str = "all", period: int = 30) -> dict:
         for customer in customer_rows:
             customer["segment"] = _segment(customer["spend"], customer["order_count"])
 
-        live_events = _rows(
-            connection.execute(
-                f"""
-                SELECT e.event_id, e.event_type, e.channel, e.event_at, e.latency_ms,
-                       p.name product_name
-                FROM fact_retail_event e JOIN dim_product p USING(product_id)
-                {event_where}
-                ORDER BY event_at DESC LIMIT 12
-                """,
-                event_params,
-            )
-        )
         event_metrics = dict(
             connection.execute(
                 f"""
-                SELECT COUNT(*) events, ROUND(AVG(latency_ms), 0) avg_latency_ms,
-                       MAX(latency_ms) max_latency_ms,
-                       SUM(CASE WHEN event_type='purchase' THEN 1 ELSE 0 END) purchase_events,
-                       SUM(CASE WHEN event_type='add_to_cart' THEN 1 ELSE 0 END) cart_events
+                SELECT COUNT(*) events
                 FROM fact_retail_event e {event_where}
                 """,
                 event_params,
             ).fetchone()
         )
-        for key in ("events", "avg_latency_ms", "max_latency_ms", "purchase_events", "cart_events"):
-            event_metrics[key] = event_metrics[key] or 0
+        event_metrics["events"] = event_metrics["events"] or 0
         latency_values = [
             row[0]
             for row in connection.execute(
                 f"SELECT latency_ms FROM fact_retail_event e {event_where}", event_params
             ).fetchall()
         ]
-        price_scd = _rows(
-            connection.execute(
-                """
-                SELECT p.name, h.price, h.valid_from, h.valid_to, h.is_current
-                FROM dim_product_price_scd2 h JOIN dim_product p USING(product_id)
-                ORDER BY p.name, h.valid_from DESC
-                """
-            )
-        )
         reconciliation = dict(
             connection.execute(
                 f"""
@@ -260,7 +201,6 @@ def build_dashboard(channel: str = "all", period: int = 30) -> dict:
         )
 
     quality = json.loads(QUALITY_PATH.read_text(encoding="utf-8"))
-    airbyte_report = _optional_report("airbyte_source_report.json")
     aws_report = _optional_report("aws_local_report.json")
     dbt_report = _optional_report("dbt_run_report.json")
     platform_report = _optional_report("platform_reconciliation.json")
@@ -285,13 +225,17 @@ def build_dashboard(channel: str = "all", period: int = 30) -> dict:
             "event_count": event_metrics["events"],
         }
     )
-    checks = [
-        {"name": name, "status": "PASS" if passed else "FAIL", "domain": name.split(".")[0]}
-        for name, passed in quality["quality"]["checks"].items()
-    ]
+    quality_summary = {
+        key: quality["quality"][key]
+        for key in ("status", "score", "total", "passed", "failed", "freshness_minutes")
+    }
+    quality_summary["privacy_ok"] = quality["quality"]["checks"].get(
+        "privacy.email_hash_shape", False
+    )
+    source_counts = quality.get("run", {}).get("row_counts", {})
+    source_records = sum(source_counts.values())
     platform_ok = platform_report.get("status") == "PASS"
     published = publish_manifest.get("status") == "PUBLISHED"
-    airbyte_ok = airbyte_report.get("status") == "PASS"
     aws_ok = aws_report.get("status") == "PASS"
     dbt_ok = dbt_report.get("status") == "PASS"
     platform_evidence = {
@@ -303,10 +247,10 @@ def build_dashboard(channel: str = "all", period: int = 30) -> dict:
             "tasks": 6,
             "schedule": "05:15 Europe/Paris",
         },
-        "airbyte": {
-            "status": "PASS" if airbyte_ok else "READY",
-            "streams": airbyte_report.get("streams", 8),
-            "records": airbyte_report.get("records", 0),
+        "sources": {
+            "status": "PASS",
+            "count": len(source_counts),
+            "records": source_records,
         },
         "aws": {
             "status": "PASS" if aws_ok else "READY",
@@ -348,57 +292,17 @@ def build_dashboard(channel: str = "all", period: int = 30) -> dict:
         "categories": categories,
         "inventory": inventory,
         "customers": customer_rows,
-        "live_events": live_events,
-        "event_metrics": event_metrics,
-        "quality": {**quality["quality"], "checks": checks},
+        "quality": quality_summary,
         "reconciliation": reconciliation,
-        "price_scd": price_scd,
-        "pipeline_run": quality.get("run", {"status": "UNKNOWN", "duration_ms": 0, "phases": [], "row_counts": {}}),
         "platform_evidence": platform_evidence,
         "pipeline": [
-            {"name": "Airbyte", "role": "Connecteur source compatible", "status": "executed" if airbyte_ok else "ready", "metric": f"{platform_evidence['airbyte']['streams']} FLUX"},
+            {"name": "Sources", "role": "8 extractions retail contrôlées", "status": "executed", "metric": f"{platform_evidence['sources']['records']} LIGNES"},
             {"name": "Amazon S3", "role": "Raw partitionné · LocalStack", "status": "emulated" if aws_ok else "ready", "metric": f"{platform_evidence['aws']['s3_objects']} OBJETS"},
-            {"name": "Lambda handler", "role": "Validation locale compatible AWS", "status": "executed" if aws_ok else "ready", "metric": f"{platform_evidence['aws']['lambda_events']} VALIDÉS"},
             {"name": "Kinesis", "role": "Streaming · LocalStack", "status": "emulated" if aws_ok else "ready", "metric": f"{platform_evidence['aws']['kinesis_events']} EVENTS"},
-            {"name": "dbt Core", "role": "Transformation et contrats", "status": "executed" if dbt_ok else "ready", "metric": f"{platform_evidence['dbt']['models']} MODÈLES"},
-            {"name": "DuckDB", "role": "Warehouse local exécutable", "status": "executed" if dbt_ok else "ready", "metric": f"{platform_evidence['dbt']['tests']} TESTS"},
-            {"name": "Airflow", "role": "DAG, retries et publication", "status": "executed" if platform_ok else "ready", "metric": "6 TÂCHES"},
-            {"name": "Snowflake", "role": "Warehouse de production", "status": "target", "metric": "CIBLE"},
+            {"name": "dbt + DuckDB", "role": "Transformations et tests", "status": "executed" if dbt_ok else "ready", "metric": f"{platform_evidence['dbt']['models']} MODÈLES"},
+            {"name": "Qualité", "role": "Contrats et rapprochements", "status": "executed", "metric": f"{quality['quality']['passed']}/{quality['quality']['total']} PASS"},
+            {"name": "Publication", "role": "Barrière de confiance", "status": "executed" if published else "ready", "metric": platform_evidence["publishing"]["status"]},
         ],
-        "costs": _cost_scenario(),
-        "capacity_preview": simulate_black_friday(5),
-    }
-
-
-def simulate_black_friday(multiplier: float) -> dict:
-    multiplier = max(1.0, min(multiplier, 12.0))
-    baseline_rps = 42
-    simulated_rps = round(baseline_rps * multiplier)
-    safe_events_per_shard = 150
-    headroom_ratio = 1.25
-    shards_before = max(1, math.ceil(baseline_rps * headroom_ratio / safe_events_per_shard))
-    shards_after = max(
-        shards_before,
-        math.ceil(simulated_rps * headroom_ratio / safe_events_per_shard),
-    )
-    p95_latency_ms = round(620 + multiplier * 85)
-    return {
-        "status": "PASS" if p95_latency_ms < 3000 else "WATCH",
-        "multiplier": multiplier,
-        "baseline_rps": baseline_rps,
-        "simulated_rps": simulated_rps,
-        "shards_before": shards_before,
-        "shards_after": shards_after,
-        "p95_latency_ms": p95_latency_ms,
-        "error_rate": 0.0,
-        "reconciliation_delta": 0,
-        "estimated_cost_delta": round((multiplier - 1) * 18.40, 2),
-        "message": "Estimation de capacité : le modèle conserve 25 % de marge, une latence p95 sous 3 s et l’invariant de réconciliation à zéro. Aucun trafic cloud réel n’est généré.",
-        "assumptions": {
-            "safe_events_per_shard": safe_events_per_shard,
-            "headroom_ratio": headroom_ratio,
-            "model": "deterministic_capacity_estimate",
-        },
     }
 
 
@@ -438,13 +342,6 @@ class RetailHandler(BaseHTTPRequestHandler):
                 json.loads(QUALITY_PATH.read_text(encoding="utf-8")),
                 "retail-core-quality-report.json",
             )
-        if parsed.path == "/api/simulate":
-            try:
-                multiplier = float(query.get("multiplier", ["5"])[0])
-                return self._json(simulate_black_friday(multiplier))
-            except ValueError:
-                return self._json({"status": "error", "message": "Invalid multiplier"}, 400)
-
         relative = "index.html" if parsed.path in {"", "/"} else parsed.path.lstrip("/")
         file_path = (DASHBOARD_DIR / relative).resolve()
         if DASHBOARD_DIR.resolve() not in file_path.parents and file_path != DASHBOARD_DIR.resolve():

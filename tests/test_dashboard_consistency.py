@@ -60,7 +60,7 @@ class DashboardConsistencyTest(unittest.TestCase):
         self.assertTrue(web_week["channel_mix"])
         self.assertEqual({row["channel"] for row in web_week["channel_mix"]}, {"web"})
         self.assertLessEqual(web_week["kpis"]["orders"], all_month["kpis"]["orders"])
-        self.assertLessEqual(web_week["event_metrics"]["events"], all_month["event_metrics"]["events"])
+        self.assertLessEqual(web_week["kpis"]["event_count"], all_month["kpis"]["event_count"])
         self.assertEqual(web_week["reconciliation"]["delta"], 0)
 
         with closing(sqlite3.connect(self.db_path)) as connection:
@@ -68,9 +68,9 @@ class DashboardConsistencyTest(unittest.TestCase):
                 "SELECT COUNT(*) FROM fact_retail_event WHERE event_at >= ? AND channel = 'web'",
                 [web_week["meta"]["cutoff"]],
             ).fetchone()[0]
-        self.assertEqual(web_week["event_metrics"]["events"], expected_events)
+        self.assertEqual(web_week["kpis"]["event_count"], expected_events)
 
-    def test_inventory_scd_and_cost_model_are_internally_consistent(self):
+    def test_inventory_and_scd_are_internally_consistent(self):
         dashboard = serve.build_dashboard("all", 30)
 
         for item in dashboard["inventory"]:
@@ -85,7 +85,6 @@ class DashboardConsistencyTest(unittest.TestCase):
             expected_risk = "critical" if expected_atp < item["safety_stock"] else "watch" if expected_atp < item["safety_stock"] * 2 else "healthy"
             self.assertEqual(item["risk_level"], expected_risk)
 
-        self.assertEqual(len(dashboard["price_scd"]), 24)
         with closing(sqlite3.connect(self.db_path)) as connection:
             invalid_products = connection.execute(
                 """
@@ -97,12 +96,6 @@ class DashboardConsistencyTest(unittest.TestCase):
                 """
             ).fetchone()[0]
         self.assertEqual(invalid_products, 0)
-
-        costs = dashboard["costs"]
-        self.assertAlmostEqual(sum(item["amount"] for item in costs["components"]), costs["monthly_total"], places=2)
-        self.assertAlmostEqual(sum(item["share"] for item in costs["components"]), 100.0, delta=0.2)
-        expected_unit_cost = costs["monthly_total"] / (costs["monthly_event_volume"] / 1000)
-        self.assertAlmostEqual(costs["cost_per_1k_events"], expected_unit_cost, places=2)
 
     def test_inventory_combines_fixed_stock_with_filtered_demand(self):
         all_month = serve.build_dashboard("all", 30)
@@ -127,15 +120,6 @@ class DashboardConsistencyTest(unittest.TestCase):
             for item in web_week["inventory"]
         }
         self.assertEqual(web_stock, all_stock)
-
-    def test_capacity_model_is_explicit_and_bounded(self):
-        scenario = serve.simulate_black_friday(5)
-        self.assertEqual(scenario["simulated_rps"], 210)
-        self.assertGreater(scenario["shards_after"], scenario["shards_before"])
-        self.assertEqual(scenario["assumptions"]["model"], "deterministic_capacity_estimate")
-        self.assertIn("Aucun trafic cloud réel", scenario["message"])
-        self.assertEqual(serve.simulate_black_friday(99)["multiplier"], 12)
-
 
 if __name__ == "__main__":
     unittest.main()

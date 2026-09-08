@@ -18,13 +18,5 @@ class StaticSiteBuildTests(unittest.TestCase):
                 sum(item["selected_units_sold"] for item in dashboard["inventory"]),
                 dashboard["kpis"]["units"],
             )
-
-    def test_all_capacity_steps_are_embedded(self):
-        simulations = self.payload["simulations"]
-        self.assertEqual(len(simulations), 21)
-        self.assertEqual(simulations["5.0"]["simulated_rps"], 210)
-        self.assertEqual(simulations["5.0"]["reconciliation_delta"], 0)
-
-
 if __name__ == "__main__":
     unittest.main()

@@ -35,8 +35,8 @@ if dag is not None:
         doc_md="""
         # Retail Core daily
 
-        Le DAG exécute réellement le connecteur source, le profil AWS local quand il est
-        activé, le modèle de référence, `dbt build`, la réconciliation batch/stream/paiement
+        Le DAG génère et contrôle les huit sources, exécute le profil AWS local quand il
+        est activé, le modèle de référence, `dbt build`, la réconciliation batch/stream/paiement
         et le publishing gate. La planification à 05:15 laisse une fenêtre contrôlée avant
         le SLA métier de 08:00 Europe/Paris.
         """,

@@ -4,7 +4,7 @@ import json
 from hashlib import sha256
 from pathlib import Path
 
-from serve import build_dashboard, simulate_black_friday
+from serve import build_dashboard
 
 
 ROOT = Path(__file__).parent
@@ -19,11 +19,7 @@ def build_static_payload() -> dict:
         for channel in CHANNELS
         for period in PERIODS
     }
-    simulations = {
-        f"{half_step / 2:.1f}": simulate_black_friday(half_step / 2)
-        for half_step in range(4, 25)
-    }
-    return {"dashboards": dashboards, "simulations": simulations}
+    return {"dashboards": dashboards}
 
 
 def main() -> None:

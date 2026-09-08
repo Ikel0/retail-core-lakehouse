@@ -32,7 +32,8 @@ class OrchestrationTest(unittest.TestCase):
             )
             manifest = publish_kpis(project_root, reconciliation)
 
-            self.assertEqual(extraction["streams"], 8)
+            self.assertEqual(extraction["sources"], 8)
+            self.assertEqual(extraction["records"], 5928)
             self.assertEqual(cloud_stage["status"], "SKIPPED")
             self.assertEqual(reference["quality_checks"], 24)
             self.assertEqual(reconciliation["status"], "PASS")
