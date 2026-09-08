@@ -6,6 +6,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class PlatformContractTest(unittest.TestCase):
+    def test_public_dashboard_stays_focused(self):
+        html = (ROOT / "dashboard" / "index.html").read_text(encoding="utf-8")
+        app = (ROOT / "dashboard" / "app.js").read_text(encoding="utf-8")
+
+        self.assertEqual(html.count('class="nav-item'), 4)
+        for view in ("overview", "inventory", "customers", "reliability"):
+            self.assertIn(f'data-view="{view}"', html)
+        for removed_view in ("realtime", "pipeline", "quality", "costs"):
+            self.assertNotIn(f'data-view="{removed_view}"', html)
+
     def test_airflow_dag_calls_every_real_stage(self):
         source = (ROOT / "dags" / "retail_core_daily.py").read_text(encoding="utf-8")
         self.assertIn('schedule="15 5 * * *"', source)

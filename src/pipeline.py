@@ -294,6 +294,7 @@ def run(data_dir: Path) -> dict:
             "products": len(products),
             "customers": len(customers),
             "identity_links": len(customer_identities),
+            "inventory": len(stock),
             "orders": len(orders),
             "payments": len(payments),
             "events": len(events),

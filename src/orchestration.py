@@ -3,16 +3,26 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from connectors.source_retail.source import discover_catalog, source_inventory
-
 from .generate_data import generate
 from .pipeline import run as run_reference_pipeline
+
+SOURCE_FILES = (
+    "products.csv",
+    "customers.csv",
+    "customer_identities.csv",
+    "stock.csv",
+    "orders.csv",
+    "payments.csv",
+    "stream_events.csv",
+    "price_history.csv",
+)
 
 
 def _write_report(project_root: Path, name: str, payload: dict) -> None:
@@ -24,19 +34,24 @@ def _write_report(project_root: Path, name: str, payload: dict) -> None:
 
 
 def extract_sources(project_root: Path) -> dict:
-    """Generate source data and exercise the Airbyte-compatible catalog contract."""
+    """Generate the eight deterministic source extracts and count their records."""
     raw_dir = project_root / "data" / "raw"
     generate(raw_dir)
-    evidence = source_inventory(raw_dir)
-    evidence["catalog"] = discover_catalog(raw_dir)
-    evidence["generated_at"] = datetime.now(timezone.utc).isoformat()
-    _write_report(project_root, "airbyte_source_report.json", evidence)
-    return {
-        "status": evidence["status"],
-        "streams": evidence["streams"],
-        "records": evidence["records"],
-        "record_counts": evidence["record_counts"],
+    record_counts = {}
+    for filename in SOURCE_FILES:
+        with (raw_dir / filename).open(encoding="utf-8") as stream:
+            record_counts[filename.removesuffix(".csv")] = sum(
+                1 for _ in csv.DictReader(stream)
+            )
+    report = {
+        "status": "PASS",
+        "sources": len(SOURCE_FILES),
+        "records": sum(record_counts.values()),
+        "record_counts": record_counts,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
     }
+    _write_report(project_root, "source_report.json", report)
+    return report
 
 
 def stage_local_aws(project_root: Path, extraction: dict) -> dict:
