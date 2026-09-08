@@ -1,4 +1,4 @@
-"""Deterministic synthetic data generator for the local retail demo."""
+"""Deterministic synthetic data generator for the retail reference runtime."""
 
 import csv
 import hashlib

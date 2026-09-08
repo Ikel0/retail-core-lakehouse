@@ -333,7 +333,7 @@ def build_dashboard(channel: str = "all", period: int = 30) -> dict:
     }
     return {
         "meta": {
-            "environment": "DEMO LOCALE",
+            "environment": "RUNTIME LOCAL",
             "generated_at": quality["kpis"]["generated_at"],
             "channel": channel,
             "period": period,
@@ -358,7 +358,7 @@ def build_dashboard(channel: str = "all", period: int = 30) -> dict:
         "pipeline": [
             {"name": "Airbyte", "role": "Connecteur source compatible", "status": "executed" if airbyte_ok else "ready", "metric": f"{platform_evidence['airbyte']['streams']} FLUX"},
             {"name": "Amazon S3", "role": "Raw partitionné · LocalStack", "status": "emulated" if aws_ok else "ready", "metric": f"{platform_evidence['aws']['s3_objects']} OBJETS"},
-            {"name": "AWS Lambda", "role": "Validation événementielle", "status": "emulated" if aws_ok else "ready", "metric": f"{platform_evidence['aws']['lambda_events']} VALIDÉS"},
+            {"name": "Lambda handler", "role": "Validation locale compatible AWS", "status": "executed" if aws_ok else "ready", "metric": f"{platform_evidence['aws']['lambda_events']} VALIDÉS"},
             {"name": "Kinesis", "role": "Streaming · LocalStack", "status": "emulated" if aws_ok else "ready", "metric": f"{platform_evidence['aws']['kinesis_events']} EVENTS"},
             {"name": "dbt Core", "role": "Transformation et contrats", "status": "executed" if dbt_ok else "ready", "metric": f"{platform_evidence['dbt']['models']} MODÈLES"},
             {"name": "DuckDB", "role": "Warehouse local exécutable", "status": "executed" if dbt_ok else "ready", "metric": f"{platform_evidence['dbt']['tests']} TESTS"},
