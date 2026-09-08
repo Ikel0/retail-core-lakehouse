@@ -1,4 +1,4 @@
-.PHONY: demo serve test portfolio dbt-build dbt-docker aws-local platform-run docker-build docker-up docker-down platform-up platform-down airflow-test package-lambda terraform-fmt terraform-validate
+.PHONY: demo serve test static-site dbt-build dbt-docker aws-local platform-run docker-build docker-up docker-down platform-up platform-down airflow-test package-lambda terraform-fmt terraform-validate
 
 AIRFLOW_DATE ?= $(shell date +%F)
 
@@ -11,9 +11,9 @@ serve:
 test:
 	PYTHONPATH=. python3 -m unittest discover -s tests -v
 
-portfolio:
+static-site:
 	python3 run_demo.py
-	python3 build_portfolio.py
+	python3 build_static_site.py
 
 dbt-build:
 	python3 -m src.dbt_runner build

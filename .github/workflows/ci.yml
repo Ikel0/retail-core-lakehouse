@@ -39,7 +39,7 @@ jobs:
         run: python -m src.dbt_runner build --full-refresh --no-generate
 
       - name: Build static cockpit
-        run: python build_portfolio.py
+        run: python build_static_site.py
 
       - name: Validate Compose model
         run: docker compose --profile platform --profile tools config --quiet

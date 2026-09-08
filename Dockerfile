@@ -1,7 +1,7 @@
 FROM python:3.13-slim
 
 LABEL org.opencontainers.image.title="Retail Core Command Center"
-LABEL org.opencontainers.image.description="Portfolio Data Engineering retail omnicanal"
+LABEL org.opencontainers.image.description="Omnichannel retail data platform"
 LABEL org.opencontainers.image.authors="Ikel Ouedraogo"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

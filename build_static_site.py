@@ -1,4 +1,4 @@
-"""Build the standalone portfolio edition of the dashboard."""
+"""Build the standalone static edition of the dashboard."""
 
 import json
 from hashlib import sha256
@@ -60,7 +60,7 @@ def main() -> None:
     (OUTPUT / "app.js").write_text(application, encoding="utf-8")
     (OUTPUT / "static-data.js").write_text(static_data, encoding="utf-8")
     (OUTPUT / ".nojekyll").write_text("", encoding="utf-8")
-    print(f"Built standalone portfolio in {OUTPUT}")
+    print(f"Built standalone static site in {OUTPUT}")
 
 
 if __name__ == "__main__":

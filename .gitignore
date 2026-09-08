@@ -11,6 +11,8 @@ logs/
 *.tfstate
 *.tfstate.*
 .DS_Store
+.Rapp.history
+docs/*.docx
 dist/
 site/
 docs/_rendered/

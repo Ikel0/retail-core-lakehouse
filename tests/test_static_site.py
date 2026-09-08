@@ -1,9 +1,9 @@
 import unittest
 
-from build_portfolio import build_static_payload
+from build_static_site import build_static_payload
 
 
-class PortfolioBuildTests(unittest.TestCase):
+class StaticSiteBuildTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.payload = build_static_payload()
