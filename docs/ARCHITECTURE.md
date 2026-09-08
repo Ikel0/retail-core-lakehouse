@@ -2,7 +2,7 @@
 
 ## Vue d’ensemble
 
-J’ai structuré le projet autour de frontières proches d’une plateforme retail de production, tout en gardant une exécution locale gratuite et démontrable.
+La plateforme sépare ingestion batch, événements, orchestration, transformation, contrôles et publication. Le profil local reste reproductible sans dépendance à un compte cloud.
 
 ```text
                                   ┌─────────────────────────────────────┐
@@ -52,7 +52,7 @@ CRM · ERP · PLM · POS · e-commerce│  Sources synthétiques déterministes�
                               └────────────────────────────────┘
 ```
 
-LocalStack fournit les API S3, Kinesis et CloudWatch. La validation Lambda-compatible est exécutée dans le chemin événementiel local. DuckDB est l’adapter dbt d’exécution ; le profil Snowflake fourni représente le warehouse cible.
+LocalStack fournit les API S3, Kinesis et CloudWatch. Le handler compatible Lambda est importé et exécuté dans le processus événementiel local ; le service AWS Lambda lui-même n’est pas lancé. DuckDB est l’adapter dbt d’exécution ; le profil Snowflake fourni représente uniquement le warehouse cible.
 
 ## Séquence orchestrée
 
@@ -116,9 +116,9 @@ L’exécution locale publie trois métriques CloudWatch : objets Raw, événeme
 
 Les leviers FinOps documentés sont le lifecycle S3, le dimensionnement des shards, les modèles dbt incrémentaux, l’auto-suspend Snowflake et le right-sizing Lambda. Le cockpit sépare les mesures exécutées des hypothèses de coût : il ne présente jamais une estimation comme une facture réelle.
 
-## Passage en production
+## Trajectoire de production
 
-| Local démontrable | Cible de production |
+| Runtime local | Cible de production |
 |---|---|
 | CSV Raw | Connecteurs SaaS/ERP et S3 |
 | LocalStack | Compte AWS cloisonné par environnement |
@@ -127,4 +127,4 @@ Les leviers FinOps documentés sont le lifecycle S3, le dimensionnement des shar
 | identifiants de test | IAM, Secrets Manager et KMS dédiés |
 | exécution sur un poste | CI/CD, réseau privé, alerting et astreinte |
 
-Les transformations métier restent dans dbt et les étapes restent appelées par le même DAG. Le passage en production concerne donc principalement les adapters, les connexions, la sécurité, le dimensionnement et les procédures d’exploitation.
+Les transformations métier restent dans dbt et les étapes restent appelées par le même DAG. Le passage en production concerne principalement les adapters, les connexions, la sécurité, le dimensionnement et les procédures d’exploitation. L’infrastructure Terraform est validée statiquement ; elle n’est ni planifiée ni appliquée par défaut.

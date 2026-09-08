@@ -2,107 +2,69 @@
 
 [![CI](https://github.com/Ikel0/retail-core-lakehouse/actions/workflows/ci.yml/badge.svg)](https://github.com/Ikel0/retail-core-lakehouse/actions/workflows/ci.yml)
 
-J’ai conçu ce produit data pour réunir ventes omnicanales, identité client, catalogue, prix, paiements et stocks dans une source de vérité retail contrôlée. Le projet ne se limite pas à un dashboard : un DAG Apache Airflow exécute l’ingestion, les API AWS locales, le modèle de référence, `dbt build`, les rapprochements métier et le publishing gate.
+Plateforme data retail omnicanale de bout en bout. Elle rapproche les ventes, les paiements, les stocks, les événements digitaux et les identités client, puis ne publie les data products que si les contrôles métier et techniques sont conformes.
 
-**Démonstration interactive :** [Retail Core Command Center](https://ikel0.github.io/retail-core-lakehouse/)
+**Application :** [Retail Core Command Center](https://ikel0.github.io/retail-core-lakehouse/)
 
-## Résultat vérifié
+## Finalité
 
-| Indicateur | Résultat du profil complet |
-|---|---:|
-| Sources ingérées | 8 flux · 5 928 lignes |
-| Ventes / paiements | 960 / 960 |
-| Identités réconciliées | 640 liens vers 160 Golden Records |
-| Événements retail | 3 160 publiés dans Kinesis local |
-| Contrôles Python | 24 / 24 réussis |
-| Build dbt | 19 modèles · 78 tests · 1 snapshot · 0 échec |
-| Réconciliation | 0 unité · 0,00 € |
-| Orchestration | DAG Airflow 3.3.1 · 6 tâches · succès |
+- consolider une source de vérité ventes/paiements ;
+- calculer un stock disponible à la promesse (`ATP`) ;
+- réunifier les identités CRM, web, POS et marketplace en Golden Records ;
+- historiser les prix et les états de stock en SCD2 ;
+- piloter qualité, fraîcheur, capacité et coûts depuis un cockpit interactif.
 
-Les données sont synthétiques, déterministes et sans information personnelle réelle.
+Toutes les données sont synthétiques, déterministes et sans information personnelle réelle.
 
 ## Architecture
 
 ```text
-CRM / ERP / PLM / POS / e-commerce
-              │
-              ├── connecteur source compatible Airbyte ──> S3 Raw (LocalStack)
-              │
-              └── événements ──> validation Lambda ──> Kinesis (LocalStack)
+CRM · ERP · PLM · POS · e-commerce
+                 │
+                 ├── batch ──> connecteur compatible Airbyte ──> S3 Raw local
+                 │
+                 └── événements ──> validation ──> Kinesis local
                                                         │
-Apache Airflow 3.3.1 ───────────────────────────────────┤
-  05:15 Europe/Paris · retries · ordre · publishing gate│
+Apache Airflow ─────────────────────────────────────────┤
+  ingestion · reprise · ordre · publishing gate        │
                                                         ▼
-                           DuckDB local ──> dbt Core ──> Retail Marts
-                                              │
-                           tests + snapshot SCD2 + documentation
-                                              │
-                                              ▼
-                      ATP · Customer 360 · KPI · cockpit interactif
-
-Cible de production : S3 / Kinesis / Lambda / CloudWatch + Snowflake
-                      provisionnés par Terraform et orchestrés par Airflow/MWAA
+                            DuckDB ──> dbt Core ──> Retail Marts
+                                           │
+                             tests · SCD2 · réconciliations
+                                           │
+                                           ▼
+                   KPI · ATP · Customer 360 · RFM · repricing
 ```
 
-## Ce qui est réellement exécuté
+Le profil local utilise LocalStack pour appeler de vraies API compatibles S3, Kinesis et CloudWatch sans compte AWS. DuckDB exécute les transformations dbt à la place du warehouse Snowflake cible.
 
-| Composant | Niveau de preuve |
+## Exécution de référence
+
+| Contrôle | Résultat |
+|---|---:|
+| Sources | 8 flux · 5 928 lignes |
+| Ventes / paiements | 960 / 960 |
+| Résolution d’identité | 640 identités · 160 Golden Records |
+| Flux événementiel | 3 160 événements |
+| Contrôles Python | 24 / 24 |
+| Build dbt | 19 modèles · 78 tests · 1 snapshot · 0 échec |
+| Réconciliation | 0 unité · 0,00 € |
+| Airflow | 1 DAG · 6 tâches · succès |
+
+## Périmètre technique
+
+| Niveau | Composants |
 |---|---|
-| Apache Airflow 3.3.1 | Image officielle, DAG importé sans erreur et six tâches exécutées |
-| dbt Core + DuckDB | `dbt build` réel : staging, intermédiaire, marts, tests et snapshot SCD2 |
-| Airbyte | Source locale compatible avec les commandes `spec`, `check`, `discover` et `read` |
-| AWS S3 | Huit fichiers Raw chargés par l’API S3 dans LocalStack |
-| Amazon Kinesis | 3 160 événements écrits par lots et relus depuis un shard local |
-| AWS Lambda | Validation de schéma, versionnement et clé d’idempotence appliqués aux événements |
-| CloudWatch | Métriques, logs et alarme de latence créés via les API AWS locales |
-| Terraform | Stack AWS cible : S3, Kinesis, Lambda, IAM et CloudWatch |
-| Snowflake | Profil dbt cible fourni ; aucun compte Snowflake n’est simulé ni revendiqué |
+| Exécuté | Airflow, dbt Core, DuckDB, pipeline Python/SQLite, tests, rapprochements, application web |
+| Émulé localement | API S3, Kinesis et CloudWatch via LocalStack |
+| Compatible | protocole source Airbyte, handler de validation Lambda |
+| Préparé pour la cible | profil Snowflake et infrastructure AWS Terraform |
 
-LocalStack émule les API AWS sur la machine. DuckDB remplace Snowflake pour rendre le build gratuit et reproductible. Ces substitutions sont explicites dans le code, le cockpit et la documentation.
+Snowflake, AWS et MWAA ne sont pas déployés par ce dépôt. Terraform est validé sans `apply`. Le détail se trouve dans [l’état d’implémentation](docs/IMPLEMENTATION_STATUS.md).
 
-## Démarrage rapide
+## Orchestration
 
-### Cockpit uniquement
-
-```bash
-docker compose up --build -d retail-core
-```
-
-Ouvrir [http://127.0.0.1:8042](http://127.0.0.1:8042).
-
-### Plateforme complète avec Airflow et AWS local
-
-```bash
-docker compose --profile platform up --build -d
-make airflow-test
-```
-
-- Cockpit : [http://127.0.0.1:8042](http://127.0.0.1:8042)
-- Airflow : [http://127.0.0.1:8080](http://127.0.0.1:8080)
-- Endpoint AWS local : `http://127.0.0.1:4566`
-
-Le mode administrateur automatique d’Airflow est réservé à cette démonstration locale. Il ne doit pas être utilisé en production.
-
-Pour arrêter les services :
-
-```bash
-docker compose --profile platform down
-```
-
-### Exécutions ciblées
-
-```bash
-make dbt-docker       # dbt build dans une image isolée
-make aws-local        # S3, Kinesis, Lambda et CloudWatch via LocalStack
-make test             # tests Python rapides
-make terraform-validate
-```
-
-Sans Docker, le chemin de référence reste disponible avec `python3 run_demo.py`, puis `python3 serve.py`.
-
-## DAG Airflow
-
-Le DAG `retail_core_daily` est planifié à 05:15, heure de Paris, afin de conserver une fenêtre de reprise avant le SLA métier de 08:00. Il impose un seul run actif et deux retries espacés de cinq minutes.
+Le DAG `retail_core_daily` est planifié à 05:15 (`Europe/Paris`), avec deux reprises espacées de cinq minutes et un seul run actif.
 
 ```text
 extract_sources
@@ -118,53 +80,73 @@ reconcile_platform
 publish_kpis
 ```
 
-La dernière tâche ne publie rien si un test, une étape activée, le rapprochement batch/Kinesis ou le rapprochement ventes/paiements échoue.
+La publication est bloquée si une étape échoue ou si les rapprochements batch/Kinesis et ventes/paiements ne retombent pas à zéro.
 
-## Modèle retail
+## Modèles principaux
 
-Les huit sources représentent le catalogue, les clients, les identités par canal, les stocks, les commandes, les paiements, les événements et l’historique des prix. Elles alimentent notamment :
+| Data product | Usage |
+|---|---|
+| `fct_sales` / `fct_payments` | source de vérité commerciale et rapprochement financier |
+| `fct_retail_event` | parcours omnicanal et contrôle du flux temps réel |
+| `dim_customer` | Golden Record pseudonymisé |
+| `dim_product_price_scd2` | historique des prix |
+| `snp_inventory_state` | historique des états de stock |
+| `fct_available_to_promise` | stock promettable et niveau de risque |
+| `mart_customer_rfm` | segmentation récence, fréquence, montant |
+| `mart_repricing_candidates` | recommandations tarifaires explicables et bornées |
 
-- `dim_product` et ses hiérarchies produit ;
-- `dim_customer` et le Golden Record pseudonymisé ;
-- `dim_product_price_scd2` pour l’historique des prix ;
-- `fct_sales`, `fct_payments` et leur rapprochement ;
-- `fct_retail_event` pour le flux omnicanal ;
-- `fct_available_to_promise` pour l’ATP ;
-- `snp_inventory_state` pour l’historisation SCD2 des états de stock.
-
-Le calcul ATP est :
+Formule ATP :
 
 ```text
 stock magasin + stock entrepôt + entrant - réservations - unités vendues
 ```
 
-## Fiabilité et exploitation
+## Démarrage
 
-Les contrôles couvrent l’unicité, les références, les domaines de valeurs, la résolution d’identité, la pseudonymisation, les paiements, la fraîcheur, les partitions Kinesis et les périodes SCD2. Les tests dbt complètent ces contrats au niveau staging et marts, avec notamment des assertions singulières sur l’ATP, les identités et les deux rapprochements.
+Cockpit seul :
 
-Le cockpit présente sept angles : performance commerciale, événements, ATP, Customer 360, plateforme, qualité/SCD2 et FinOps. Les filtres canal/période recalculent les ventes, événements, clients, demande stock et rapprochements sur le même périmètre. Le stock physique reste volontairement un instantané réseau ; la vue ATP affiche séparément la demande filtrée et sa couverture estimée. Sur les vues Pipeline & Ops et FinOps, les sélecteurs sont remplacés par un indicateur « périmètre global », car un run complet et un scénario d’infrastructure ne dépendent pas d’un canal de vente.
+```bash
+docker compose up --build -d retail-core
+```
 
-## Structure du dépôt
+Plateforme locale complète :
+
+```bash
+docker compose --profile platform up --build -d
+make airflow-test
+```
+
+- cockpit : [http://127.0.0.1:8042](http://127.0.0.1:8042)
+- Airflow : [http://127.0.0.1:8080](http://127.0.0.1:8080)
+- API AWS locale : `http://127.0.0.1:4566`
+
+Sans Docker :
+
+```bash
+python3 run_demo.py
+python3 serve.py
+```
+
+## Qualité et CI
+
+La CI exécute le pipeline de référence, les tests Python et JavaScript, `dbt build`, la validation Docker Compose, le build de l’image et la validation Terraform. Les règles couvrent notamment unicité, intégrité référentielle, domaines de valeurs, pseudonymisation, fraîcheur, SCD2, ATP et rapprochements financiers.
+
+## Structure
 
 ```text
-dags/                 DAG Airflow réel
+dags/                 orchestration Airflow
 connectors/           source compatible Airbyte
-src/                  génération, pipeline, dbt runner, orchestration, AWS local
-models/ dbt_tests/    modèles, tests et unité dbt
-snapshots/            SCD2 des états de stock
-lambda/               validation événementielle
+src/                  ingestion, qualité, AWS local et publication
+models/ dbt_tests/    transformations et contrôles dbt
+snapshots/            historisation SCD2 des stocks
+lambda/               validation événementielle compatible Lambda
 infra/terraform/      infrastructure AWS cible
-dashboard/            cockpit sombre et responsive
+dashboard/            cockpit interactif sombre
 tests/                tests automatisés
-docs/                 architecture, guide et déroulé de démonstration
+docs/                 architecture et état d’implémentation
 ```
 
 ## Documentation
 
 - [Architecture et flux](docs/ARCHITECTURE.md)
-- [Guide fonctionnel et technique](docs/PROJECT_GUIDE.md)
-- [Matrice exigences / preuves](docs/IMPLEMENTATION_MATRIX.md)
-- [Déroulé de démonstration](docs/DEMO_RUNBOOK.md)
-- [Dossier professionnel](docs/Retail_Core_Lakehouse_Ikel_Ouedraogo.docx)
-
-Ce projet montre une démarche de Data Engineer orientée produit : partir des décisions métier, définir les grains et les invariants, automatiser les preuves, puis rendre l’ensemble observable et déployable.
+- [État d’implémentation](docs/IMPLEMENTATION_STATUS.md)

@@ -8,18 +8,18 @@ from pathlib import Path
 
 
 PRODUCTS = [
-    ("P100", "T-shirt thermique", "Thermique", "Femme", "Hiver 2026", 34.99),
-    ("P101", "Pull col roulé confort", "Maille", "Femme", "Hiver 2026", 49.99),
-    ("P102", "Jean coupe confort", "Pantalons", "Femme", "Permanent", 69.99),
-    ("P103", "Manteau matelassé", "Manteaux", "Femme", "Hiver 2026", 129.99),
-    ("P104", "Polo maille piquée", "Polos", "Homme", "Permanent", 39.99),
-    ("P105", "Pantalon chino stretch", "Pantalons", "Homme", "Permanent", 59.99),
-    ("P106", "Veste légère déperlante", "Vestes", "Homme", "Automne 2026", 89.99),
-    ("P107", "Chemise coton doux", "Chemises", "Homme", "Permanent", 44.99),
-    ("P108", "Baskets amortissantes", "Chaussures", "Mixte", "Automne 2026", 79.99),
-    ("P109", "Pyjama douceur", "Nuit", "Femme", "Hiver 2026", 42.99),
-    ("P110", "Gilet zippé", "Maille", "Homme", "Hiver 2026", 54.99),
-    ("P111", "Écharpe chaude", "Accessoires", "Mixte", "Hiver 2026", 24.99),
+    ("P100", "T-shirt coton", "T-shirts", "Femme", "Essentiels", 34.99),
+    ("P101", "Pull col rond", "Maille", "Femme", "Automne 2026", 49.99),
+    ("P102", "Jean droit", "Denim", "Femme", "Essentiels", 69.99),
+    ("P103", "Trench léger", "Manteaux", "Femme", "Printemps 2026", 129.99),
+    ("P104", "Polo maille piquée", "Polos", "Homme", "Essentiels", 39.99),
+    ("P105", "Pantalon chino stretch", "Pantalons", "Homme", "Essentiels", 59.99),
+    ("P106", "Veste légère imperméable", "Vestes", "Homme", "Automne 2026", 89.99),
+    ("P107", "Chemise Oxford", "Chemises", "Homme", "Essentiels", 44.99),
+    ("P108", "Sneakers urbaines", "Chaussures", "Mixte", "Essentiels", 79.99),
+    ("P109", "Sweat à capuche", "Sportswear", "Mixte", "Essentiels", 42.99),
+    ("P110", "Surchemise en denim", "Vestes", "Mixte", "Automne 2026", 54.99),
+    ("P111", "Sac à dos compact", "Accessoires", "Mixte", "Essentiels", 24.99),
 ]
 
 
