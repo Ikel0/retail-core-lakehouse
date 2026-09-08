@@ -1,16 +1,12 @@
 const state = { view: "overview", channel: "all", period: 30, data: null, loading: false, requestId: 0 };
 const viewTitles = {
   overview: "Vue d’ensemble",
-  realtime: "Temps réel",
   inventory: "Stock & ATP",
   customers: "Customer 360",
-  pipeline: "Pipeline & Ops",
-  quality: "Qualité & SCD2",
-  costs: "FinOps",
+  reliability: "Fiabilité data",
 };
 const globalViewScopes = {
-  pipeline: { pill: "RUN COMPLET", status: "Run complet · filtres non applicables" },
-  costs: { pill: "SCÉNARIO GLOBAL", status: "Scénario global · filtres non applicables" },
+  reliability: { pill: "RUN COMPLET", status: "Run complet · périmètre global" },
 };
 const colors = ["#ff7657", "#57d3e8", "#9f8cff", "#b8f36b", "#ffb85c", "#f573ae", "#6e91ff"];
 const root = document.querySelector("#view-root");
@@ -21,7 +17,6 @@ const integer = new Intl.NumberFormat("fr-FR");
 const icon = (name) => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"})[char]);
 const dateShort = value => new Date(value).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" });
-const timeShort = value => new Date(value).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 
 function activeScopeLabel() {
   const channel = document.querySelector("#channel-filter");
@@ -36,7 +31,6 @@ function updateScopeUi() {
   const contextualStatus = {
     inventory: `Demande filtrée · ${activeScopeLabel()}`,
     customers: `Clients filtrés · ${activeScopeLabel()}`,
-    quality: `Rapprochement filtré · ${activeScopeLabel()}`,
   };
 
   document.querySelectorAll(".select-wrap").forEach(control => {
@@ -132,26 +126,18 @@ function categoryBars(items) {
 function reconciliation(data) {
   const unitDelta = Number(data.unit_delta ?? data.delta ?? 0);
   const amountDelta = Number(data.amount_delta ?? 0);
-  return `<div class="recon-stack"><div class="recon-card"><div class="recon-side"><span>UNITÉS BATCH</span><strong>${integer.format(data.batch_units)}</strong></div><div class="recon-equals">${icon("check")}</div><div class="recon-side"><span>UNITÉS KINESIS</span><strong>${integer.format(data.stream_units)}</strong></div></div><div class="recon-card payment"><div class="recon-side"><span>VENTES COMPTABLES</span><strong>${euro.format(data.sales_amount || 0)}</strong></div><div class="recon-equals">${icon("check")}</div><div class="recon-side"><span>PAIEMENTS SOLDÉS</span><strong>${euro.format(data.payment_amount || 0)}</strong></div></div></div><div class="recon-foot"><span>Écarts : <b>${integer.format(unitDelta)} unité</b> · <b>${amountDelta.toFixed(2)} €</b></span><span class="badge ${data.status === "PASS" ? "pass" : "critical"}">${icon(data.status === "PASS" ? "check" : "close")} ${data.status}</span></div>`;
+  return `<div class="recon-stack"><div class="recon-card"><div class="recon-side"><span>UNITÉS BATCH</span><strong>${integer.format(data.batch_units)}</strong></div><div class="recon-equals">${icon("check")}</div><div class="recon-side"><span>UNITÉS KINESIS</span><strong>${integer.format(data.stream_units)}</strong></div></div><div class="recon-card payment"><div class="recon-side"><span>VENTES COMPTABLES</span><strong>${euro.format(data.sales_amount || 0)}</strong></div><div class="recon-equals">${icon("check")}</div><div class="recon-side"><span>PAIEMENTS SOLDÉS</span><strong>${euro.format(data.payment_amount || 0)}</strong></div></div></div><div class="recon-foot"><span>Écarts : <b>${integer.format(unitDelta)} unité</b> · <b>${amountDelta.toFixed(2)} €</b></span><span class="badge ${data.status === "PASS" ? "pass" : "critical"}">${icon(data.status === "PASS" ? "check" : "shield")} ${data.status}</span></div>`;
 }
 
 function renderOverview() {
   const d = state.data, k = d.kpis;
-  root.innerHTML = hero("RETAIL CORE · SINGLE SOURCE OF TRUTH", "Le retail en un seul regard", "Ventes synthétiques omnicanales, disponibilité stock et fiabilité du pipeline sur la sélection active.", `<button type="button" class="subtle-button" data-view-jump="pipeline">Voir l’architecture</button><button type="button" class="subtle-button accent" data-open-sim>Scénario Black Friday</button>`)
+  root.innerHTML = hero("PERFORMANCE OMNICANALE", "Le retail en un seul regard", "Ventes, stock disponible et qualité des données sur le périmètre sélectionné.", `<button type="button" class="subtle-button" data-view-jump="reliability">Voir la fiabilité</button>`)
     + `<div class="kpi-grid">${kpi("Chiffre d’affaires", euro.format(k.revenue || 0), `${d.meta.period} derniers jours`, "var(--coral)", "stream", `${integer.format(k.customers || 0)} clients actifs`)}${kpi("Commandes", integer.format(k.orders || 0), `${integer.format(k.units || 0)} articles`, "var(--cyan)", "box", `Panier moyen ${euro.format(k.avg_basket || 0)}`)}${kpi("Stock disponible · ATP", integer.format(k.total_atp || 0), "hors filtres de vente", "var(--lime)", "box", `${integer.format(d.inventory.length)} références · snapshot courant`)}${kpi("Qualité des données", `${k.quality_score}%`, "run complet · hors filtres", "var(--violet)", "shield", d.quality.status === "PASS" ? "Publication autorisée" : "Publication bloquée")}</div>`
     + `<div class="dashboard-grid">${panel("Performance commerciale", "Chiffre d’affaires quotidien · filtre actif", lineChart(d.series), 8, `<div class="legend"><span><i></i>CA sélectionné</span></div>`)}${panel("Mix des canaux", "Contribution dans la même sélection", donut(d.channel_mix), 4)}${panel("Catégories motrices", "Top 7 catégories par chiffre d’affaires", categoryBars(d.categories), 5)}${panel("Double réconciliation", `Batch / Kinesis et ventes / paiements · ${d.meta.scope}`, reconciliation(d.reconciliation), 7, `<span class="badge ${d.reconciliation.status === "PASS" ? "pass" : "critical"}">${d.reconciliation.status === "PASS" ? "2 INVARIANTS EXACTS" : "ÉCART DÉTECTÉ"}</span>`)}</div>`;
   bindChartTooltips();
   bindInlineActions();
 }
 
-function renderRealtime() {
-  const d = state.data, m = d.event_metrics;
-  const feed = d.live_events.length ? `<div class="event-feed">${d.live_events.map(event => `<div class="event-row"><div class="event-type">${event.event_type.replaceAll("_", " ")}</div><div><strong>${escapeHtml(event.product_name)}</strong><span>${escapeHtml(event.channel)} · ${timeShort(event.event_at)}</span></div><span class="latency">${integer.format(event.latency_ms)} ms</span></div>`).join("")}</div>` : `<div class="error-state"><strong>Aucun événement</strong>La sélection active ne contient aucun événement.</div>`;
-  root.innerHTML = hero("STREAMING RETAIL · REPLAY SYNTHÉTIQUE", "Le parcours événementiel sous contrôle", "Consultations, paniers et achats sont filtrés, validés puis rapprochés du batch sur le même périmètre.", `<button type="button" class="subtle-button accent" data-open-sim>Estimer un trafic ×5</button>`)
-    + `<div class="kpi-grid">${kpi("Événements dans la fenêtre", integer.format(m.events), d.meta.scope, "var(--cyan)", "stream", `${integer.format(m.purchase_events)} achats`)}${kpi("Latence moyenne", `${integer.format(m.avg_latency_ms)} ms`, `p95 ${integer.format(d.kpis.latency_p95_ms)} ms`, "var(--lime)", "bolt", d.kpis.latency_p95_ms < 3000 ? "SLA cible respecté" : "SLA cible dépassé")}${kpi("Achats détectés", integer.format(m.purchase_events), "événements purchase", "var(--coral)", "box", `Réconciliés : ${d.reconciliation.status}`)}${kpi("Ajouts au panier", integer.format(m.cart_events), "événements web", "var(--violet)", "stream", "Signal d’intention")}</div>`
-    + `<div class="dashboard-grid">${panel("Replay des événements", "12 événements les plus récents de la sélection", feed, 5, `<span class="badge healthy">● REPLAY</span>`)}${panel("Valeur captée", "Ventes quotidiennes corrélées aux achats", lineChart(d.series), 7, `<span>p95 ${integer.format(d.kpis.latency_p95_ms)} ms</span>`)}${panel("Garantie d’exactitude", "Idempotence métier et double rapprochement sur le même filtre", reconciliation(d.reconciliation), 6)}${panel("Résilience : exécuté et cible", "Preuves locales et extension de production clairement séparées", `<div class="check-grid"><div class="check-item"><div class="check-mark">${icon("check")}</div><div><strong>event_id unique</strong><span>Test automatisé</span></div></div><div class="check-item"><div class="check-mark">${icon("check")}</div><div><strong>Partition source_customer_id</strong><span>Test automatisé</span></div></div><div class="check-item"><div class="check-mark">${icon("check")}</div><div><strong>Alarme CloudWatch</strong><span>Exécutée via AWS local</span></div></div><div class="check-item target"><div class="check-mark">${icon("arrow")}</div><div><strong>Dead-letter queue</strong><span>Cible production</span></div></div></div>`, 6)}</div>`;
-  bindChartTooltips(); bindInlineActions();
-}
 
 function inventoryTable(items) {
   return `<div class="data-table-wrap"><table class="data-table"><thead><tr><th>Produit</th><th>Catégorie</th><th>Ventes sélection</th><th>Magasins</th><th>Entrepôt</th><th>Réservé</th><th>Entrant</th><th>ATP</th><th>Risque</th></tr></thead><tbody id="inventory-body">${items.map(item => `<tr data-search="${escapeHtml(`${item.name} ${item.category} ${item.risk_level}`.toLowerCase())}"><td><div class="product-cell"><span class="product-icon">${item.product_id.slice(-2)}</span><strong>${escapeHtml(item.name)}</strong></div></td><td>${escapeHtml(item.category)}</td><td><strong>${integer.format(item.selected_units_sold || 0)}</strong></td><td>${integer.format(item.store_stock)}</td><td>${integer.format(item.warehouse_stock)}</td><td>${integer.format(item.reserved)}</td><td>${integer.format(item.incoming)}</td><td class="atp-cell"><div class="atp-value"><strong>${integer.format(item.atp)}</strong><span>seuil ${item.safety_stock}</span></div><div class="table-meter"><i class="${item.risk_level}" style="width:${Math.min(100, item.atp / 1600 * 100)}%"></i></div></td><td><span class="badge ${item.risk_level}">${item.risk_level.toUpperCase()}</span></td></tr>`).join("")}</tbody></table></div>`;
@@ -182,55 +168,33 @@ function renderCustomers() {
   const segments = ["Champions", "Fidèles", "Prometteurs", "Nouveaux"].map(label => ({ label, value: customers.filter(item => item.segment === label).length }));
   const omnichannel = customers.filter(item => String(item.channels).includes(",")).length;
   const toolbar = `<div class="table-tools"><label class="search-box">${icon("search")}<input id="customer-search" type="search" placeholder="ID, pays ou segment…" /></label></div>`;
-  const privacyPassed = d.quality.checks.some(check => check.name === "privacy.email_hash_shape" && check.status === "PASS");
+  const privacyPassed = d.quality.privacy_ok;
   root.innerHTML = hero("CRM + WEB + POS · IDENTITY RESOLUTION", "Une identité client unifiée", "Les comportements sont rapprochés sans exposer d’email : le modèle analytique ne conserve qu’un hash et des identifiants métier.")
     + `<div class="kpi-grid">${kpi("Clients actifs", integer.format(d.kpis.customers), activeScopeLabel(), "var(--violet)", "users", "Golden records filtrés")}${kpi("Profils affichés", integer.format(customers.length), "classés par valeur", "var(--cyan)", "users", "Top analytique")}${kpi("Omnicanaux", integer.format(omnichannel), "parmi les profils affichés", "var(--cyan)", "stream", "Plusieurs canaux")}${kpi("Protection PII", privacyPassed ? "100%" : "À corriger", "hashes contrôlés", "var(--lime)", "shield", privacyPassed ? "Contrat validé" : "Publication bloquée")}</div>`
     + `<div class="dashboard-grid">${panel("Segmentation RFM", "Répartition des profils affichés", donut(segments, "PROFILS"), 4)}${panel("Customer 360 · Golden Records", `Top ${customers.length} sur ${integer.format(d.kpis.customers)} clients actifs`, customerTable(customers), 8, toolbar)}</div>`;
   bindTableSearch("#customer-search", "#customer-body");
 }
 
-function renderPipeline() {
-  const d = state.data, run = d.pipeline_run, platform = d.platform_evidence;
+function renderReliability() {
+  const d = state.data;
+  const q = d.quality;
+  const platform = d.platform_evidence;
+  const publishable = q.status === "PASS" && d.reconciliation.status === "PASS";
   const flow = `<div class="pipeline-flow">${d.pipeline.map(node => `<div class="pipeline-node ${node.status}"><div class="node-icon">${node.name.split(" ")[0].slice(0,4).toUpperCase()}<i class="node-status"></i></div><strong>${node.name}</strong><span>${node.role}</span><b>${node.metric}</b></div>`).join("")}</div>`;
-  const maxDuration = Math.max(...run.phases.map(phase => phase.duration_ms), 1);
-  const execution = run.phases.length ? `<div class="dag">${run.phases.map(phase => `<div class="dag-row"><strong>${escapeHtml(phase.name)}</strong><span>${escapeHtml(phase.label)}</span><div class="task-bar"><i style="width:${Math.max(5, phase.duration_ms / maxDuration * 100)}%"></i></div><time>${Number(phase.duration_ms).toFixed(1)} ms</time></div>`).join("")}</div>` : `<div class="error-state"><strong>Aucune télémétrie</strong>Relancez le pipeline pour produire le rapport d’exécution.</div>`;
   const proofs = [
-    ["DAG Airflow 3.3.1", `${platform.airflow.tasks} tâches · ${platform.airflow.schedule}`],
-    ["Connecteur Airbyte-compatible", `${platform.airbyte.streams} flux · ${integer.format(platform.airbyte.records)} lignes`],
-    ["S3 Raw partitionné", `${platform.aws.s3_objects} objets via LocalStack`],
-    ["Kinesis + validation", `${integer.format(platform.aws.kinesis_events)} publiés · ${integer.format(platform.aws.lambda_events)} validés`],
-    ["CloudWatch", `${platform.aws.cloudwatch_metrics} métriques + logs + alarme`],
-    ["dbt Core", `${platform.dbt.models} modèles · ${platform.dbt.tests} tests · ${platform.dbt.snapshots} snapshot`],
-    ["Warehouse DuckDB", `Adapter exécuté · ${platform.dbt.failed} échec`],
-    ["Publishing gate", `SLA ${platform.publishing.sla} · écarts à zéro`],
+    ["Sources contrôlées", `${platform.sources.count} fichiers · ${integer.format(platform.sources.records)} lignes`],
+    ["AWS local", `${platform.aws.s3_objects} objets S3 · ${integer.format(platform.aws.kinesis_events)} événements Kinesis`],
+    ["Validation événementielle", `${integer.format(platform.aws.lambda_events)} événements validés par le handler`],
+    ["dbt + DuckDB", `${platform.dbt.models} modèles · ${platform.dbt.tests} tests · ${platform.dbt.snapshots} snapshot`],
+    ["Qualité métier", `${q.passed}/${q.total} contrôles réussis`],
+    ["Publishing gate", `${d.reconciliation.unit_delta} unité · ${Number(d.reconciliation.amount_delta).toFixed(2)} € d’écart`],
   ];
   const proofGrid = `<div class="check-grid">${proofs.map(([title, detail]) => `<div class="check-item"><div class="check-mark">${icon("check")}</div><div><strong>${escapeHtml(title)}</strong><span>${escapeHtml(detail)}</span></div></div>`).join("")}</div>`;
-  root.innerHTML = hero("AIRFLOW · DBT · AWS LOCAL", "Une plateforme réellement orchestrée", "Le profil Docker exécute les six tâches du DAG, les appels AWS locaux et le build dbt. Snowflake reste explicitement la cible de production.", `<button type="button" class="subtle-button accent" data-open-sim>Estimer la capacité</button>`)
-    + `<div class="kpi-grid">${kpi("Airflow 3.3.1", platform.airflow.status, platform.airflow.dag_id, "var(--lime)", "pipeline", `${platform.airflow.tasks} tâches exécutables`)}${kpi("dbt build", `${platform.dbt.models} modèles`, `${platform.dbt.tests} tests + ${platform.dbt.snapshots} snapshot`, "var(--violet)", "shield", platform.dbt.status)}${kpi("AWS local", platform.aws.status, "S3 · Kinesis · CloudWatch", "var(--cyan)", "stream", `${integer.format(platform.aws.kinesis_events)} événements · validation Lambda-compatible`)}${kpi("Publication", platform.publishing.status, `SLA ${platform.publishing.sla}`, "var(--coral)", "bolt", "2 rapprochements exacts")}</div>`
-    + `<div class="dashboard-grid">${panel("Chaîne d’exécution et cible", "Vert : exécuté · orange : AWS émulé localement · bleu : cible de production", flow, 12, `<div class="evidence-legend"><span class="badge pass">EXÉCUTÉ</span><span class="badge emulated">AWS LOCAL</span><span class="badge target">CIBLE</span></div>`)}${panel("Preuves du dernier profil complet", "Valeurs issues des rapports d’exécution, pas d’un écran décoratif", proofGrid, 7, `<span class="badge ${platform.status === "PASS" ? "pass" : "warn"}">${platform.status}</span>`)}${panel("Pipeline de référence", "Durées mesurées des transformations Python indépendantes", execution, 5, `<span class="badge pass">${run.status} · ${Number(run.duration_ms).toFixed(1)} ms</span>`)}</div>`;
-  bindInlineActions();
-}
+  const trust = `<div class="quality-score"><div class="score-ring" style="--score:${q.score}%"><div><strong>${q.score}%</strong><span>QUALITÉ</span></div></div><div class="quality-copy"><h3>${publishable ? "Publication autorisée" : "Publication bloquée"}</h3><p>${publishable ? "Tous les contrôles et rapprochements sont conformes." : "Un écart doit être corrigé avant publication."}</p></div></div>`;
 
-function renderQuality() {
-  const d = state.data, q = d.quality;
-  const checks = `<div class="check-grid">${q.checks.map(check => `<div class="check-item ${check.status === "PASS" ? "" : "failed"}"><div class="check-mark">${icon(check.status === "PASS" ? "check" : "close")}</div><div><strong>${escapeHtml(check.name)}</strong><span>${escapeHtml(check.domain)} · ${check.status}</span></div></div>`).join("")}</div>`;
-  const scd = `<div class="scd-timeline">${d.price_scd.map(item => `<div class="scd-item ${item.is_current ? "current" : ""}"><strong>${escapeHtml(item.name)}</strong><b>${Number(item.price).toFixed(2)} €</b><span>${item.valid_from} → ${item.valid_to === "9999-12-31" ? "actuel" : item.valid_to}</span><span class="badge ${item.is_current ? "pass" : "warn"}">${item.is_current ? "CURRENT" : "HISTORY"}</span></div>`).join("")}</div>`;
-  const publishable = q.status === "PASS" && d.reconciliation.status === "PASS";
-  root.innerHTML = hero("DATA CONTRACTS · TRUST BY DESIGN", "Des indicateurs auxquels le métier peut croire", "Le publishing gate bloque l’exposition si un contrat ou la réconciliation du périmètre sélectionné échoue.", `<a class="subtle-button" href="/api/quality-report" download="retail-core-quality-report.json">Télécharger le rapport JSON</a>`)
-    + `<div class="kpi-grid">${kpi("Score qualité", `${q.score}%`, `${q.passed}/${q.total} contrôles`, "var(--lime)", "shield", publishable ? "Publishing gate ouvert" : "Publishing gate fermé")}${kpi("Fraîcheur", `${q.freshness_minutes} min`, "dernier événement généré", "var(--cyan)", "stream", "Seuil < 24 h")}${kpi("Double rapprochement", "2 / 2", activeScopeLabel(), "var(--coral)", "cost", `${d.reconciliation.unit_delta} unité · ${Number(d.reconciliation.amount_delta).toFixed(2)} €`)}${kpi("SCD Type 2", integer.format(d.price_scd.length), "versions chargées", "var(--violet)", "pipeline", `${integer.format(d.inventory.length)} produits × 2 versions`)}</div>`
-    + `<div class="dashboard-grid">${panel("Confiance globale", "Qualité avant exposition aux utilisateurs", `<div class="quality-score"><div class="score-ring" style="--score:${q.score}%"><div><strong>${q.score}%</strong><span>TRUST SCORE</span></div></div><div class="quality-copy"><h3>${publishable ? "Prêt pour publication" : "Publication bloquée"}</h3><p>${publishable ? "Tous les contrôles passent et la réconciliation de la sélection est exacte." : "Un contrôle doit être corrigé avant d’exposer les indicateurs."}</p></div></div>`, 5, `<span class="badge ${publishable ? "pass" : "critical"}">${publishable ? "PASS" : "BLOCKED"}</span>`)}${panel("Contrôles automatisés", "Contrats, intégrité, métier, privacy, SCD2 et fraîcheur", checks, 7)}${panel("Historisation des prix · SCD Type 2", "Une version historique et une version courante par produit", scd, 12, `<span>${d.price_scd.length} versions</span>`)}</div>`;
-}
-
-function renderCosts() {
-  const d = state.data, c = d.costs, capacity = d.capacity_preview;
-  const usage = c.monthly_total / c.budget * 100;
-  const safeCapacity = capacity.shards_after * capacity.assumptions.safe_events_per_shard / capacity.assumptions.headroom_ratio;
-  const capacityLoad = Math.min(100, capacity.simulated_rps / safeCapacity * 100);
-  const costBars = `<div class="cost-bars">${c.components.map((item, index) => `<div class="cost-row"><span>${item.name}</span><div class="cost-bar"><i style="width:${item.share}%;background:${colors[index + 2]}"></i></div><b>${item.amount.toFixed(0)} €</b></div>`).join("")}</div>`;
-  root.innerHTML = hero("FINOPS · SCÉNARIO CLOUD CIBLE", "Un modèle de coût explicite, pas une fausse facture", `Hypothèse pédagogique : ${compact.format(c.monthly_event_volume)} événements par mois sur des services managés. Les montants servent à comparer budget, prévision et leviers.`)
-    + `<div class="kpi-grid">${kpi("Coût mensuel estimé", euro.format(c.monthly_total), "scénario cible", "var(--violet)", "cost", `${c.savings_percent}% sous le scénario non optimisé`)}${kpi("Budget simulé", euro.format(c.budget), `${usage.toFixed(0)}% consommé`, "var(--lime)", "shield", "Marge disponible")}${kpi("Prévision simulée", euro.format(c.forecast), "fin de mois", "var(--cyan)", "stream", `${c.forecast_under_budget_percent}% sous budget`)}${kpi("Coût / 1k événements", `${c.cost_per_1k_events.toFixed(2)} €`, `${compact.format(c.monthly_event_volume)} événements/mois`, "var(--coral)", "bolt", "Calcul cohérent")}</div>`
-    + `<div class="dashboard-grid">${panel("Budget du scénario", "Estimation paramétrique · aucune facture cloud connectée", `<div class="cost-total"><div><span>COÛT MODÉLISÉ</span><strong>${euro.format(c.monthly_total)}</strong></div><span>Prévision ${euro.format(c.forecast)}</span></div><div class="budget-meter"><i style="width:${usage}%"></i></div><div class="budget-labels"><span>0 €</span><span>Budget ${euro.format(c.budget)}</span></div><div class="assumption-note">${c.assumptions.map(item => `<span>${escapeHtml(item)}</span>`).join("")}</div>`, 5)}${panel("Répartition du scénario", "Les montants totalisent exactement le coût mensuel modélisé", costBars, 7)}${panel("Optimisations proposées", "Leviers à mettre en œuvre dans l’architecture cible", `<div class="check-grid"><div class="check-item target"><div class="check-mark">${icon("arrow")}</div><div><strong>Snowflake auto-suspend</strong><span>Compute cible</span></div></div><div class="check-item"><div class="check-mark">${icon("check")}</div><div><strong>dbt incrémental</strong><span>Modèles fournis</span></div></div><div class="check-item target"><div class="check-mark">${icon("arrow")}</div><div><strong>Lambda right-sizing</strong><span>Mesure cible</span></div></div><div class="check-item target"><div class="check-mark">${icon("arrow")}</div><div><strong>S3 lifecycle</strong><span>Politique cible</span></div></div></div>`, 6)}${panel("Capacité Black Friday", "Exemple déterministe à ×5 avec 25 % de marge", `<div class="quality-score"><div class="score-ring" style="--score:${capacityLoad}%"><div><strong>${capacityLoad.toFixed(0)}%</strong><span>CHARGE</span></div></div><div class="quality-copy"><h3>+${euro.format(capacity.estimated_cost_delta)}</h3><p>${capacity.shards_before} → ${capacity.shards_after} unités de capacité, p95 estimée à ${integer.format(capacity.p95_latency_ms)} ms. Aucun trafic réel n’est lancé.</p><button type="button" class="subtle-button accent" data-open-sim style="margin-top:12px">Modifier le scénario</button></div></div>`, 6)}</div>`;
-  bindInlineActions();
+  root.innerHTML = hero("AIRFLOW · DBT · DATA QUALITY", "Un pipeline fiable avant publication", "Airflow orchestre les traitements. dbt construit les modèles. La publication reste bloquée tant que les contrôles ne passent pas.")
+    + `<div class="kpi-grid">${kpi("Airflow", `${platform.airflow.tasks} tâches`, platform.airflow.schedule, "var(--lime)", "pipeline", platform.airflow.status)}${kpi("dbt build", `${platform.dbt.models} modèles`, `${platform.dbt.tests} tests + ${platform.dbt.snapshots} snapshot`, "var(--violet)", "shield", platform.dbt.status)}${kpi("Contrôles qualité", `${q.passed}/${q.total}`, "contrats techniques et métier", "var(--cyan)", "shield", q.status)}${kpi("Réconciliation", "0 écart", "unités et paiements", "var(--coral)", "stream", d.reconciliation.status)}</div>`
+    + `<div class="dashboard-grid">${panel("Chaîne exécutée", "Vert : exécuté · orange : API AWS locales", flow, 12, `<div class="evidence-legend"><span class="badge pass">EXÉCUTÉ</span><span class="badge emulated">AWS LOCAL</span></div>`)}${panel("Preuves essentielles", "Les chiffres proviennent des rapports d’exécution", proofGrid, 7)}${panel("Décision de publication", "La donnée n’est exposée qu’après validation", trust, 5, `<span class="badge ${publishable ? "pass" : "critical"}">${publishable ? "PASS" : "BLOCKED"}</span>`)}</div>`;
 }
 
 function exportInventory() {
@@ -259,7 +223,6 @@ function bindTableSearch(inputSelector, bodySelector) {
 }
 
 function bindInlineActions() {
-  document.querySelectorAll("[data-open-sim]").forEach(button => button.addEventListener("click", openSimulation));
   document.querySelectorAll("[data-view-jump]").forEach(button => button.addEventListener("click", () => switchView(button.dataset.viewJump)));
 }
 
@@ -267,7 +230,7 @@ function render() {
   if (!state.data) return;
   root.style.animation = "none";
   requestAnimationFrame(() => root.style.animation = "viewIn .28s ease both");
-  ({ overview: renderOverview, realtime: renderRealtime, inventory: renderInventory, customers: renderCustomers, pipeline: renderPipeline, quality: renderQuality, costs: renderCosts }[state.view])();
+  ({ overview: renderOverview, inventory: renderInventory, customers: renderCustomers, reliability: renderReliability }[state.view])();
 }
 
 async function loadData(showFeedback = false) {
@@ -315,46 +278,10 @@ function switchView(view) {
   render();
 }
 
-function openSimulation() {
-  document.querySelector("#simulation-modal").hidden = false;
-  document.querySelector("#simulation-result").innerHTML = "";
-  document.querySelector("#traffic-multiplier").focus();
-}
-function closeSimulation() { document.querySelector("#simulation-modal").hidden = true; }
-async function runSimulation() {
-  const button = document.querySelector("#run-simulation");
-  const multiplier = Number(document.querySelector("#traffic-multiplier").value);
-  button.disabled = true;
-  button.innerHTML = `<span class="pulse-dot"></span>Simulation en cours…`;
-  document.querySelector("#simulation-result").innerHTML = `<div class="skeleton" style="margin-top:14px;min-height:110px"></div>`;
-  try {
-    let result = window.RETAIL_CORE_STATIC?.simulations?.[multiplier.toFixed(1)];
-    if (!result) {
-      const response = await fetch(`/api/simulate?multiplier=${multiplier}`);
-      if (!response.ok) throw new Error("Simulation indisponible");
-      result = await response.json();
-    }
-    await new Promise(resolve => setTimeout(resolve, 650));
-    document.querySelector("#simulation-result").innerHTML = `<div class="simulation-results"><header><strong>Scénario calculé</strong><span class="badge ${result.status === "PASS" ? "pass" : "warn"}">${icon(result.status === "PASS" ? "check" : "shield")} ${result.status}</span></header><div class="simulation-results-grid"><div><span>DÉBIT ESTIMÉ</span><strong>${integer.format(result.simulated_rps)} events/s</strong></div><div><span>UNITÉS DE CAPACITÉ</span><strong>${result.shards_before} → ${result.shards_after}</strong></div><div><span>LATENCE P95</span><strong>${integer.format(result.p95_latency_ms)} ms</strong></div><div><span>TAUX D’ERREUR MODÉLISÉ</span><strong>${result.error_rate}%</strong></div><div><span>INVARIANT COMPTABLE</span><strong>${result.reconciliation_delta}</strong></div><div><span>SURCOÛT ESTIMÉ</span><strong>+${result.estimated_cost_delta.toFixed(2)} €</strong></div></div><p>${result.message}</p></div>`;
-  } catch (error) {
-    document.querySelector("#simulation-result").innerHTML = `<div class="simulation-results"><strong>Simulation indisponible</strong></div>`;
-  } finally {
-    button.disabled = false;
-    button.innerHTML = `${icon("bolt")}Calculer le scénario`;
-  }
-}
-
 document.querySelectorAll(".nav-item").forEach(item => item.addEventListener("click", () => switchView(item.dataset.view)));
 document.querySelector("#channel-filter").addEventListener("change", event => { state.channel = event.target.value; loadData(true); });
 document.querySelector("#period-filter").addEventListener("change", event => { state.period = Number(event.target.value); loadData(true); });
 document.querySelector("#refresh-data").addEventListener("click", () => loadData(true));
 document.querySelector("#mobile-menu").addEventListener("click", event => { const opened = document.querySelector("#sidebar").classList.toggle("open"); event.currentTarget.setAttribute("aria-expanded", String(opened)); });
-document.querySelector("#open-simulation").addEventListener("click", openSimulation);
-document.querySelector("#close-simulation").addEventListener("click", closeSimulation);
-document.querySelector("#simulation-modal").addEventListener("click", event => { if (event.target.id === "simulation-modal") closeSimulation(); });
-document.querySelector("#traffic-multiplier").addEventListener("input", event => { const value = Number(event.target.value); document.querySelector("#multiplier-value").textContent = `× ${value.toFixed(1)}`; document.querySelector("#projected-rps").textContent = `${Math.round(42 * value)} événements/s`; });
-document.querySelector("#run-simulation").addEventListener("click", runSimulation);
-document.addEventListener("keydown", event => { if (event.key === "Escape") closeSimulation(); });
-
 updateScopeUi();
 loadData();
