@@ -7,7 +7,7 @@ services:
       dockerfile: Dockerfile
     image: retail-core-lakehouse:latest
     ports:
-      - "8042:8042"
+      - "127.0.0.1:8042:8042"
     volumes:
       - ./reports:/app/reports
     restart: unless-stopped
@@ -38,7 +38,7 @@ services:
       AWS_DEFAULT_REGION: eu-west-3
       KINESIS_LATENCY: "0"
     ports:
-      - "4566:4566"
+      - "127.0.0.1:4566:4566"
     volumes:
       - localstack-data:/var/lib/localstack
     healthcheck:
@@ -90,7 +90,7 @@ services:
       AWS_SECRET_ACCESS_KEY: test
       AWS_DEFAULT_REGION: eu-west-3
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     volumes:
       - .:/opt/airflow/project
       - ./dags:/opt/airflow/dags
