@@ -32,6 +32,11 @@ function activeScopeLabel() {
   const label = channel?.selectedOptions?.[0]?.textContent || "Tous les canaux";
   return `${label}, ${state.period} jours`;
 }
+// Le libellé du filtre commence par une majuscule ; en milieu de phrase on l'écrit en minuscule.
+const inlineScopeLabel = () => {
+  const label = activeScopeLabel();
+  return label.charAt(0).toLocaleLowerCase("fr-FR") + label.slice(1);
+};
 
 function updateScopeUi() {
   const global = globalViews.has(state.view);
@@ -40,7 +45,7 @@ function updateScopeUi() {
   document.querySelector("#scope-status").textContent = global ? "Dernier run complet, sans filtre" : activeScopeLabel();
   document.querySelector("#refresh-data").setAttribute(
     "aria-label",
-    global ? "Actualiser le dernier run complet" : `Actualiser les données, ${activeScopeLabel()}`,
+    global ? "Actualiser le dernier run complet" : `Actualiser les données, ${inlineScopeLabel()}`,
   );
 }
 
@@ -139,7 +144,7 @@ function renderOverview() {
   const quality = statusInfo(d.quality.status);
   root.innerHTML = viewHead(`Ventes par canal, ${d.meta.period} jours`, "Chiffre d’affaires, commandes et stock disponible sur le périmètre sélectionné. La qualité porte sur le run complet.", `<button type="button" class="subtle-button" data-view-jump="reliability">Voir les contrôles</button>`)
     + `<div class="kpi-row">${kpi("Chiffre d’affaires", euro.format(k.revenue || 0), `${integer.format(k.customers || 0)} clients actifs`)}${kpi("Commandes", integer.format(k.orders || 0), `${integer.format(k.units || 0)} articles, panier moyen ${euro.format(k.avg_basket || 0)}`)}${kpi("Stock disponible (ATP)", integer.format(k.total_atp || 0), `hors filtres de vente, ${integer.format(d.inventory.length)} références`)}${kpi("Qualité des données", isNumber(k.quality_score) ? `${integer.format(k.quality_score)} %` : UNAVAILABLE, "run complet, hors filtres", d.quality.status === "PASS" ? "Publication autorisée" : "Publication bloquée", quality.tone === "pass" ? "ok" : "error")}</div>`
-    + `<div class="dashboard-grid">${panel("Chiffre d’affaires quotidien", activeScopeLabel(), lineChart(d.series), 8)}${panel("Répartition par canal", "Part du chiffre d’affaires", shareBars(mix, "La sélection ne contient aucune vente."), 4)}${panel("Catégories", "Sept premières catégories par chiffre d’affaires", categoryBars(d.categories), 5)}${panel("Rapprochements", `Batch et Kinesis, ventes et paiements, ${activeScopeLabel()}`, reconciliation(d.reconciliation), 7)}</div>`;
+    + `<div class="dashboard-grid">${panel("Chiffre d’affaires quotidien", activeScopeLabel(), lineChart(d.series), 8)}${panel("Répartition par canal", "Part du chiffre d’affaires", shareBars(mix, "La sélection ne contient aucune vente."), 4)}${panel("Catégories", "Sept premières catégories par chiffre d’affaires", categoryBars(d.categories), 5)}${panel("Rapprochements", `Batch et Kinesis, ventes et paiements, ${inlineScopeLabel()}`, reconciliation(d.reconciliation), 7)}</div>`;
   bindChartTooltips();
   bindInlineActions();
 }
@@ -159,8 +164,8 @@ function renderInventory() {
   const coverageDays = dailyDemand > 0 ? Math.round(totalAtp / dailyDemand) : null;
   const toolbar = `<label class="search-box"><input id="inventory-search" type="search" placeholder="Rechercher un produit" aria-label="Rechercher un produit" /></label>`;
   root.innerHTML = viewHead("Stock disponible (ATP) et risque de rupture", "Le stock est un instantané du réseau. Le canal et la période ne filtrent que la demande observée, qui sert à estimer la couverture.", `<button type="button" class="subtle-button" id="export-inventory">Exporter le CSV</button>`)
-    + `<div class="kpi-row">${kpi("ATP réseau", integer.format(totalAtp), "stock courant, hors filtres de vente")}${kpi("Demande sélectionnée", integer.format(selectedUnits), `unités vendues, ${activeScopeLabel()}`)}${kpi("Couverture estimée", coverageDays === null ? UNAVAILABLE : `${integer.format(coverageDays)} jours`, "au rythme de la sélection")}${kpi("Sous le seuil de sécurité", integer.format(critical), `${integer.format(watch)} à surveiller`, critical ? "Réassort à prévoir" : "Aucune référence", critical ? "error" : "ok")}</div>`
-    + `<div class="dashboard-grid">${panel("Disponibilité par produit", `ATP = magasins + entrepôt + entrant − réservé − vendu. Demande : ${activeScopeLabel()}`, inventoryTable(items), 12, toolbar)}</div>`;
+    + `<div class="kpi-row">${kpi("ATP réseau", integer.format(totalAtp), "stock courant, hors filtres de vente")}${kpi("Demande sélectionnée", integer.format(selectedUnits), `unités vendues, ${inlineScopeLabel()}`)}${kpi("Couverture estimée", coverageDays === null ? UNAVAILABLE : `${integer.format(coverageDays)} jours`, "au rythme de la sélection")}${kpi("Sous le seuil de sécurité", integer.format(critical), `${integer.format(watch)} à surveiller`, critical ? "Réassort à prévoir" : "Aucune référence", critical ? "error" : "ok")}</div>`
+    + `<div class="dashboard-grid">${panel("Disponibilité par produit", `ATP = magasins + entrepôt + entrant − réservé − vendu. Demande : ${inlineScopeLabel()}`, inventoryTable(items), 12, toolbar)}</div>`;
   bindTableSearch("#inventory-search", "#inventory-body");
   document.querySelector("#export-inventory").addEventListener("click", exportInventory);
 }
@@ -248,7 +253,7 @@ function exportInventory() {
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-  showToast(`Stock exporté, ${activeScopeLabel()}`);
+  showToast(`Stock exporté, ${inlineScopeLabel()}`);
 }
 
 function bindTableSearch(inputSelector, bodySelector) {
@@ -298,7 +303,7 @@ async function loadData(showFeedback = false) {
       : `Latence p95 ${UNAVAILABLE}`;
     updateScopeUi();
     render();
-    if (showFeedback) showToast(globalViews.has(state.view) ? "Dernier run complet relu" : `Périmètre appliqué : ${activeScopeLabel()}`);
+    if (showFeedback) showToast(globalViews.has(state.view) ? "Dernier run complet relu" : `Périmètre appliqué : ${inlineScopeLabel()}`);
   } catch (error) {
     if (requestId !== state.requestId) return;
     const statusNode = document.querySelector("#run-status");
