@@ -1,51 +1,58 @@
 const state = { view: "overview", channel: "all", period: 30, data: null, loading: false, requestId: 0 };
-const viewTitles = {
-  overview: "Vue d’ensemble",
-  inventory: "Stock & ATP",
-  customers: "Customer 360",
-  reliability: "Fiabilité data",
-};
-const globalViewScopes = {
-  reliability: { pill: "RUN COMPLET", status: "Run complet · périmètre global" },
-};
-const colors = ["#ff7657", "#57d3e8", "#9f8cff", "#b8f36b", "#ffb85c", "#f573ae", "#6e91ff"];
+// La vue fiabilité décrit le dernier run complet : les filtres canal et période ne s'y appliquent pas.
+const globalViews = new Set(["reliability"]);
+const channelLabels = { web: "E-commerce", store: "Magasins", marketplace: "Marketplace", catalog: "Catalogue" };
+const riskLabels = { critical: "Sous le seuil", watch: "À surveiller", healthy: "Normal" };
 const root = document.querySelector("#view-root");
 const euro = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
+const euroCents = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const compact = new Intl.NumberFormat("fr-FR", { notation: "compact", maximumFractionDigits: 1 });
 const integer = new Intl.NumberFormat("fr-FR");
+const UNAVAILABLE = "indisponible";
 
-const icon = (name) => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"})[char]);
 const dateShort = value => new Date(value).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" });
+const isNumber = value => typeof value === "number" && Number.isFinite(value);
+const count = (value, unit) => isNumber(value) ? `${integer.format(value)} ${unit}` : UNAVAILABLE;
+const channelLabel = value => channelLabels[value] || value;
+
+function statusInfo(status) {
+  return {
+    PASS: { label: "Réussi", tone: "pass" },
+    PUBLISHED: { label: "Publié", tone: "pass" },
+    FAIL: { label: "Échec", tone: "critical" },
+    READY: { label: "Non exécuté", tone: "ready" },
+    NOT_RUN: { label: "Non exécuté", tone: "ready" },
+  }[status] || { label: status ? String(status) : UNAVAILABLE, tone: "ready" };
+}
+const statusBadge = status => { const info = statusInfo(status); return `<span class="badge ${info.tone}">${escapeHtml(info.label)}</span>`; };
 
 function activeScopeLabel() {
   const channel = document.querySelector("#channel-filter");
-  const channelLabel = channel?.selectedOptions?.[0]?.textContent || "Tous les canaux";
-  return `${channelLabel} · ${state.period} jours`;
+  const label = channel?.selectedOptions?.[0]?.textContent || "Tous les canaux";
+  return `${label}, ${state.period} jours`;
 }
 
 function updateScopeUi() {
-  const globalScope = globalViewScopes[state.view];
-  const scopeMode = document.querySelector("#scope-mode");
-  const scopeStatus = document.querySelector("#scope-status");
-  const contextualStatus = {
-    inventory: `Demande filtrée · ${activeScopeLabel()}`,
-    customers: `Clients filtrés · ${activeScopeLabel()}`,
-  };
-
-  document.querySelectorAll(".select-wrap").forEach(control => {
-    control.hidden = Boolean(globalScope);
-  });
-  scopeMode.hidden = !globalScope;
-  document.querySelector("#scope-mode-text").textContent = globalScope?.pill || "Périmètre global";
-  scopeStatus.querySelector("b").textContent = globalScope?.status
-    || contextualStatus[state.view]
-    || `Périmètre actif · ${activeScopeLabel()}`;
-  scopeStatus.classList.toggle("global", Boolean(globalScope));
+  const global = globalViews.has(state.view);
+  document.querySelectorAll(".select-wrap").forEach(control => { control.hidden = global; });
+  document.querySelector("#scope-mode").hidden = !global;
+  document.querySelector("#scope-status").textContent = global ? "Dernier run complet, sans filtre" : activeScopeLabel();
   document.querySelector("#refresh-data").setAttribute(
     "aria-label",
-    globalScope ? `Actualiser · ${globalScope.pill.toLowerCase()}` : `Actualiser les données · ${activeScopeLabel()}`,
+    global ? "Actualiser le dernier run complet" : `Actualiser les données, ${activeScopeLabel()}`,
   );
+}
+
+// Statut tiré des rapports : contrôles qualité, rapprochements et run plateforme (Airflow, dbt, LocalStack).
+function runStatus(d) {
+  if (d.quality?.status !== "PASS" || d.reconciliation?.status !== "PASS") {
+    return { tone: "error", text: "Publication bloquée : un contrôle ou un rapprochement échoue" };
+  }
+  if (d.platform_evidence?.status === "PASS") {
+    return { tone: "ok", text: "Run complet réussi, publication autorisée" };
+  }
+  return { tone: "warn", text: "Contrôles Python réussis, run Airflow, dbt et LocalStack non exécuté" };
 }
 
 function showToast(message) {
@@ -56,91 +63,90 @@ function showToast(message) {
   showToast.timer = setTimeout(() => toast.classList.remove("show"), 2600);
 }
 
-function hero(kicker, title, copy, actions = "") {
-  return `<div class="hero-row"><div><div class="section-kicker">${kicker}</div><h2>${title}</h2><p>${copy}</p></div><div class="hero-actions">${actions}</div></div>`;
+function viewHead(title, copy, actions = "") {
+  return `<div class="view-head"><div><h2>${title}</h2><p>${copy}</p></div>${actions}</div>`;
 }
 
-function kpi(label, value, foot, accent = "var(--coral)", glyph = "grid", trend = "") {
-  return `<article class="kpi-card" style="--accent:${accent}"><div class="kpi-top"><span>${label}</span><div class="kpi-icon">${icon(glyph)}</div></div><div class="kpi-value">${value}</div><div class="kpi-foot"><span${trend ? ` style="color:${accent}"` : ""}>${trend || foot}</span>${trend ? `<span>${foot}</span>` : ""}</div></article>`;
+function kpi(label, value, detail, note = "", tone = "") {
+  const noteHtml = note ? `<span${tone ? ` class="${tone}"` : ""}>${note}</span>` : "";
+  return `<div class="kpi"><div class="kpi-label">${label}</div><div class="kpi-value">${value}</div><div class="kpi-detail">${[noteHtml, detail].filter(Boolean).join(" · ")}</div></div>`;
 }
 
 function panel(title, subtitle, content, span = 6, meta = "") {
-  return `<article class="panel span-${span}"><header class="panel-header"><div class="panel-title"><h3>${title}</h3><p>${subtitle}</p></div><div class="panel-meta">${meta}</div></header><div class="panel-body">${content}</div></article>`;
+  return `<section class="panel span-${span}"><header class="panel-header"><div class="panel-title"><h3>${title}</h3><p>${subtitle}</p></div>${meta ? `<div class="panel-meta">${meta}</div>` : ""}</header><div class="panel-body">${content}</div></section>`;
 }
 
 function lineChart(series) {
-  if (!series.length) return `<div class="error-state"><strong>Aucune vente</strong>Essayez une période ou un canal différent.</div>`;
+  if (!series.length) return `<div class="error-state"><strong>Aucune vente sur cette sélection</strong>Essayez une autre période ou un autre canal.</div>`;
   const values = series.map(item => item.revenue);
   const maxValue = Math.max(...values, 1);
-  const max = maxValue * 1.08;
-  const points = values.map((value, index) => {
-    const x = values.length === 1 ? 50 : index * (100 / (values.length - 1));
-    const y = 95 - (value / max) * 82;
-    return { x, y, value, day: series[index].day, orders: series[index].orders };
-  });
-  const polyline = points.map(p => `${p.x},${p.y}`).join(" ");
-  const area = `0,100 ${polyline} 100,100`;
+  const points = values.map((value, index) => ({
+    x: values.length === 1 ? 50 : index * (100 / (values.length - 1)),
+    y: 100 - (value / maxValue) * 100,
+  }));
   const step = Math.max(1, Math.floor(series.length / 6));
   const labels = series.filter((_, index) => index % step === 0 || index === series.length - 1).slice(-7);
-  return `<div class="line-chart" role="group" aria-label="Évolution quotidienne du chiffre d’affaires"><div class="chart-grid"><i></i><i></i><i></i><i></i></div><div class="chart-scale"><span>${compact.format(maxValue)}</span><span>${compact.format(maxValue / 2)}</span><span>0</span></div><svg viewBox="0 0 100 100" preserveAspectRatio="none"><polygon class="area" points="${area}"/><polyline class="line" points="${polyline}"/>${points.map((p, i) => `<circle class="point" cx="${p.x}" cy="${p.y}" r="1.35" vector-effect="non-scaling-stroke" data-index="${i}" tabindex="0" role="button" aria-label="${dateShort(p.day)} : ${euro.format(p.value)}, ${p.orders} commandes"/>`).join("")}</svg><div class="chart-tooltip" id="chart-tooltip"></div><div class="chart-labels">${labels.map(item => `<span>${dateShort(item.day)}</span>`).join("")}</div></div>`;
+  const buttons = points.map((p, i) => `<button type="button" class="point" style="left:${p.x}%;top:${p.y}%" data-index="${i}" aria-label="${dateShort(series[i].day)} : ${euro.format(series[i].revenue)}, ${series[i].orders} commandes"></button>`).join("");
+  return `<div class="line-chart" role="group" aria-label="Chiffre d’affaires quotidien"><div class="chart-grid"><i></i><i></i></div><div class="chart-scale"><span>${compact.format(maxValue)}</span><span>${compact.format(maxValue / 2)}</span><span>0</span></div><div class="plot"><svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polyline class="line" points="${points.map(p => `${p.x},${p.y}`).join(" ")}"/></svg>${buttons}<div class="chart-tooltip" id="chart-tooltip"></div></div><div class="chart-labels">${labels.map(item => `<span>${dateShort(item.day)}</span>`).join("")}</div></div>`;
 }
 
 function bindChartTooltips() {
   const tooltip = document.querySelector("#chart-tooltip");
   if (!tooltip) return;
   document.querySelectorAll(".point").forEach(point => {
-    const show = event => {
+    const show = () => {
       const item = state.data.series[Number(point.dataset.index)];
-      const bounds = point.closest(".line-chart").getBoundingClientRect();
-      const pointBounds = event.target.getBoundingClientRect();
-      tooltip.innerHTML = `<strong>${euro.format(item.revenue)}</strong><br>${item.orders} commandes`;
-      tooltip.style.left = `${pointBounds.left - bounds.left}px`;
-      tooltip.style.top = `${pointBounds.top - bounds.top}px`;
+      tooltip.innerHTML = `<strong>${euro.format(item.revenue)}</strong>, ${item.orders} commandes, ${dateShort(item.day)}`;
+      tooltip.style.left = point.style.left;
+      tooltip.style.top = point.style.top;
       tooltip.style.opacity = 1;
     };
+    const hide = () => { tooltip.style.opacity = 0; };
     point.addEventListener("mouseenter", show);
     point.addEventListener("focus", show);
-    point.addEventListener("mouseleave", () => tooltip.style.opacity = 0);
-    point.addEventListener("blur", () => tooltip.style.opacity = 0);
+    point.addEventListener("mouseleave", hide);
+    point.addEventListener("blur", hide);
   });
 }
 
-function donut(mix, totalLabel = "CA TOTAL") {
-  if (!mix.length) return `<div class="error-state"><strong>Aucune donnée</strong>La sélection ne contient aucun élément.</div>`;
-  const total = mix.reduce((sum, item) => sum + Number(item.revenue || item.value), 0) || 1;
-  let cursor = 0;
-  const stops = mix.map((item, index) => {
-    const start = cursor;
-    cursor += Number(item.revenue || item.value) / total * 100;
-    return `${colors[index % colors.length]} ${start}% ${cursor}%`;
-  }).join(",");
-  return `<div class="donut-layout"><div class="donut" style="background:conic-gradient(${stops})"><div class="donut-center"><strong>${compact.format(total)}</strong><span>${totalLabel}</span></div></div><div class="mix-list">${mix.map((item, index) => { const value = Number(item.revenue || item.value); return `<div class="mix-row"><i style="background:${colors[index % colors.length]}"></i><span>${escapeHtml(item.channel || item.label)}<small>${item.orders ? `${integer.format(item.orders)} commandes` : "segment client"}</small></span><b>${Math.round(value / total * 100)}%</b></div>`; }).join("")}</div></div>`;
+// Une seule série par graphique : la longueur porte l'information, pas la couleur.
+function shareBars(rows, emptyMessage) {
+  if (!rows.length) return `<div class="error-state"><strong>Aucune donnée</strong>${emptyMessage}</div>`;
+  const total = rows.reduce((sum, row) => sum + row.value, 0);
+  if (!total) return `<div class="error-state"><strong>Aucune donnée</strong>${emptyMessage}</div>`;
+  return `<div class="bar-list">${rows.map(row => `<div class="bar-row"><span title="${escapeHtml(row.label)}">${escapeHtml(row.label)}<small>${row.detail}</small></span><div class="meter"><i style="width:${row.value / total * 100}%"></i></div><b>${Math.round(row.value / total * 100)} %</b></div>`).join("")}</div>`;
 }
 
 function categoryBars(items) {
-  if (!items.length) return `<div class="error-state"><strong>Aucune catégorie</strong>La sélection active ne contient aucune vente.</div>`;
+  if (!items.length) return `<div class="error-state"><strong>Aucune catégorie</strong>La sélection ne contient aucune vente.</div>`;
   const max = Math.max(...items.map(item => item.revenue), 1);
-  return `<div class="metric-list">${items.map(item => `<div class="metric-row"><span title="${escapeHtml(item.category)}">${escapeHtml(item.category)}</span><div class="meter"><i style="width:${item.revenue / max * 100}%"></i></div><b>${compact.format(item.revenue)}</b></div>`).join("")}</div>`;
+  return `<div class="bar-list">${items.map(item => `<div class="bar-row"><span title="${escapeHtml(item.category)}">${escapeHtml(item.category)}</span><div class="meter"><i style="width:${item.revenue / max * 100}%"></i></div><b>${euro.format(item.revenue)}</b></div>`).join("")}</div>`;
 }
 
-function reconciliation(data) {
-  const unitDelta = Number(data.unit_delta ?? data.delta ?? 0);
-  const amountDelta = Number(data.amount_delta ?? 0);
-  return `<div class="recon-stack"><div class="recon-card"><div class="recon-side"><span>UNITÉS BATCH</span><strong>${integer.format(data.batch_units)}</strong></div><div class="recon-equals">${icon("check")}</div><div class="recon-side"><span>UNITÉS KINESIS</span><strong>${integer.format(data.stream_units)}</strong></div></div><div class="recon-card payment"><div class="recon-side"><span>VENTES COMPTABLES</span><strong>${euro.format(data.sales_amount || 0)}</strong></div><div class="recon-equals">${icon("check")}</div><div class="recon-side"><span>PAIEMENTS SOLDÉS</span><strong>${euro.format(data.payment_amount || 0)}</strong></div></div></div><div class="recon-foot"><span>Écarts : <b>${integer.format(unitDelta)} unité</b> · <b>${amountDelta.toFixed(2)} €</b></span><span class="badge ${data.status === "PASS" ? "pass" : "critical"}">${icon(data.status === "PASS" ? "check" : "shield")} ${data.status}</span></div>`;
+function reconciliation(r) {
+  const unitDelta = Number(r.unit_delta ?? r.delta);
+  const amountDelta = Number(r.amount_delta);
+  const rows = [
+    ["Unités", `Batch : ${integer.format(r.batch_units)}`, `Kinesis : ${integer.format(r.stream_units)}`, Number.isFinite(unitDelta) ? integer.format(unitDelta) : UNAVAILABLE],
+    ["Montants", `Ventes : ${euroCents.format(r.sales_amount || 0)}`, `Paiements soldés : ${euroCents.format(r.payment_amount || 0)}`, Number.isFinite(amountDelta) ? euroCents.format(amountDelta) : UNAVAILABLE],
+  ];
+  return `<div class="data-table-wrap"><table class="data-table"><thead><tr><th>Rapprochement</th><th>Référence</th><th>Comparé à</th><th class="r">Écart</th></tr></thead><tbody>${rows.map(([label, a, b, gap]) => `<tr><td>${label}</td><td class="num">${a}</td><td class="num">${b}</td><td class="r">${gap}</td></tr>`).join("")}</tbody></table></div><div class="recon-foot"><span>Seuil : 0 unité et moins d’un centime d’écart.</span>${statusBadge(r.status)}</div>`;
 }
 
 function renderOverview() {
   const d = state.data, k = d.kpis;
-  root.innerHTML = hero("PERFORMANCE OMNICANALE", "Le retail en un seul regard", "Ventes, stock disponible et qualité des données sur le périmètre sélectionné.", `<button type="button" class="subtle-button" data-view-jump="reliability">Voir la fiabilité</button>`)
-    + `<div class="kpi-grid">${kpi("Chiffre d’affaires", euro.format(k.revenue || 0), `${d.meta.period} derniers jours`, "var(--coral)", "stream", `${integer.format(k.customers || 0)} clients actifs`)}${kpi("Commandes", integer.format(k.orders || 0), `${integer.format(k.units || 0)} articles`, "var(--cyan)", "box", `Panier moyen ${euro.format(k.avg_basket || 0)}`)}${kpi("Stock disponible · ATP", integer.format(k.total_atp || 0), "hors filtres de vente", "var(--lime)", "box", `${integer.format(d.inventory.length)} références · snapshot courant`)}${kpi("Qualité des données", `${k.quality_score}%`, "run complet · hors filtres", "var(--violet)", "shield", d.quality.status === "PASS" ? "Publication autorisée" : "Publication bloquée")}</div>`
-    + `<div class="dashboard-grid">${panel("Performance commerciale", "Chiffre d’affaires quotidien · filtre actif", lineChart(d.series), 8, `<div class="legend"><span><i></i>CA sélectionné</span></div>`)}${panel("Mix des canaux", "Contribution dans la même sélection", donut(d.channel_mix), 4)}${panel("Catégories motrices", "Top 7 catégories par chiffre d’affaires", categoryBars(d.categories), 5)}${panel("Double réconciliation", `Batch / Kinesis et ventes / paiements · ${d.meta.scope}`, reconciliation(d.reconciliation), 7, `<span class="badge ${d.reconciliation.status === "PASS" ? "pass" : "critical"}">${d.reconciliation.status === "PASS" ? "2 INVARIANTS EXACTS" : "ÉCART DÉTECTÉ"}</span>`)}</div>`;
+  const mix = d.channel_mix.map(item => ({ label: channelLabel(item.channel), value: Number(item.revenue), detail: `${integer.format(item.orders)} commandes` }));
+  const quality = statusInfo(d.quality.status);
+  root.innerHTML = viewHead(`Ventes par canal, ${d.meta.period} jours`, "Chiffre d’affaires, commandes et stock disponible sur le périmètre sélectionné. La qualité porte sur le run complet.", `<button type="button" class="subtle-button" data-view-jump="reliability">Voir les contrôles</button>`)
+    + `<div class="kpi-row">${kpi("Chiffre d’affaires", euro.format(k.revenue || 0), `${integer.format(k.customers || 0)} clients actifs`)}${kpi("Commandes", integer.format(k.orders || 0), `${integer.format(k.units || 0)} articles, panier moyen ${euro.format(k.avg_basket || 0)}`)}${kpi("Stock disponible (ATP)", integer.format(k.total_atp || 0), `hors filtres de vente, ${integer.format(d.inventory.length)} références`)}${kpi("Qualité des données", isNumber(k.quality_score) ? `${integer.format(k.quality_score)} %` : UNAVAILABLE, "run complet, hors filtres", d.quality.status === "PASS" ? "Publication autorisée" : "Publication bloquée", quality.tone === "pass" ? "ok" : "error")}</div>`
+    + `<div class="dashboard-grid">${panel("Chiffre d’affaires quotidien", activeScopeLabel(), lineChart(d.series), 8)}${panel("Répartition par canal", "Part du chiffre d’affaires", shareBars(mix, "La sélection ne contient aucune vente."), 4)}${panel("Catégories", "Sept premières catégories par chiffre d’affaires", categoryBars(d.categories), 5)}${panel("Rapprochements", `Batch et Kinesis, ventes et paiements, ${activeScopeLabel()}`, reconciliation(d.reconciliation), 7)}</div>`;
   bindChartTooltips();
   bindInlineActions();
 }
 
-
 function inventoryTable(items) {
-  return `<div class="data-table-wrap"><table class="data-table"><thead><tr><th>Produit</th><th>Catégorie</th><th>Ventes sélection</th><th>Magasins</th><th>Entrepôt</th><th>Réservé</th><th>Entrant</th><th>ATP</th><th>Risque</th></tr></thead><tbody id="inventory-body">${items.map(item => `<tr data-search="${escapeHtml(`${item.name} ${item.category} ${item.risk_level}`.toLowerCase())}"><td><div class="product-cell"><span class="product-icon">${item.product_id.slice(-2)}</span><strong>${escapeHtml(item.name)}</strong></div></td><td>${escapeHtml(item.category)}</td><td><strong>${integer.format(item.selected_units_sold || 0)}</strong></td><td>${integer.format(item.store_stock)}</td><td>${integer.format(item.warehouse_stock)}</td><td>${integer.format(item.reserved)}</td><td>${integer.format(item.incoming)}</td><td class="atp-cell"><div class="atp-value"><strong>${integer.format(item.atp)}</strong><span>seuil ${item.safety_stock}</span></div><div class="table-meter"><i class="${item.risk_level}" style="width:${Math.min(100, item.atp / 1600 * 100)}%"></i></div></td><td><span class="badge ${item.risk_level}">${item.risk_level.toUpperCase()}</span></td></tr>`).join("")}</tbody></table></div>`;
+  const maxAtp = Math.max(...items.map(item => item.atp), 1);
+  return `<div class="data-table-wrap"><table class="data-table wide"><thead><tr><th>Produit</th><th>Catégorie</th><th class="r">Ventes sélection</th><th class="r">Magasins</th><th class="r">Entrepôt</th><th class="r">Réservé</th><th class="r">Entrant</th><th>ATP / seuil</th><th>Risque</th></tr></thead><tbody id="inventory-body">${items.map(item => `<tr data-search="${escapeHtml(`${item.name} ${item.category} ${item.product_id} ${riskLabels[item.risk_level] || item.risk_level}`.toLowerCase())}"><td>${escapeHtml(item.name)}<span class="id">${escapeHtml(item.product_id)}</span></td><td>${escapeHtml(item.category)}</td><td class="r">${integer.format(item.selected_units_sold || 0)}</td><td class="r">${integer.format(item.store_stock)}</td><td class="r">${integer.format(item.warehouse_stock)}</td><td class="r">${integer.format(item.reserved)}</td><td class="r">${integer.format(item.incoming)}</td><td class="atp-cell num"><strong>${integer.format(item.atp)}</strong> / ${integer.format(item.safety_stock)}<div class="table-meter"><i class="${item.risk_level}" style="width:${Math.max(0, item.atp) / maxAtp * 100}%"></i></div></td><td><span class="badge ${item.risk_level}">${riskLabels[item.risk_level] || escapeHtml(item.risk_level)}</span></td></tr>`).join("")}</tbody></table></div>`;
 }
 
 function renderInventory() {
@@ -151,57 +157,89 @@ function renderInventory() {
   const selectedUnits = items.reduce((sum, item) => sum + Number(item.selected_units_sold || 0), 0);
   const dailyDemand = selectedUnits / d.meta.period;
   const coverageDays = dailyDemand > 0 ? Math.round(totalAtp / dailyDemand) : null;
-  const toolbar = `<div class="table-tools"><label class="search-box">${icon("search")}<input id="inventory-search" type="search" placeholder="Rechercher un produit…" /></label></div>`;
-  root.innerHTML = hero("SUPPLY CHAIN · AVAILABLE TO PROMISE", "Le bon stock, au bon moment", "Le stock physique reste un instantané réseau. Le canal et la période filtrent la demande observée et recalculent la couverture associée.", `<button type="button" class="subtle-button" id="export-inventory">Exporter le snapshot CSV</button>`)
-    + `<div class="kpi-grid">${kpi("ATP réseau", integer.format(totalAtp), "indépendant des ventes filtrées", "var(--lime)", "box", "Snapshot stock courant")}${kpi("Demande sélectionnée", integer.format(selectedUnits), activeScopeLabel(), "var(--coral)", "stream", "Unités vendues")}${kpi("Couverture estimée", coverageDays === null ? "—" : `${integer.format(coverageDays)} j`, "au rythme de la sélection", "var(--cyan)", "bolt", activeScopeLabel())}${kpi("Risque de rupture", integer.format(critical), `${integer.format(watch)} sous surveillance`, "var(--danger)", "shield", critical ? "Action requise" : "Aucune alerte")}</div>`
-    + `<div class="dashboard-grid">${panel("Disponibilité détaillée", `Stock courant et demande sur ${activeScopeLabel()}`, inventoryTable(items), 12, toolbar)}</div>`;
+  const toolbar = `<label class="search-box"><input id="inventory-search" type="search" placeholder="Rechercher un produit" aria-label="Rechercher un produit" /></label>`;
+  root.innerHTML = viewHead("Stock disponible (ATP) et risque de rupture", "Le stock est un instantané du réseau. Le canal et la période ne filtrent que la demande observée, qui sert à estimer la couverture.", `<button type="button" class="subtle-button" id="export-inventory">Exporter le CSV</button>`)
+    + `<div class="kpi-row">${kpi("ATP réseau", integer.format(totalAtp), "stock courant, hors filtres de vente")}${kpi("Demande sélectionnée", integer.format(selectedUnits), `unités vendues, ${activeScopeLabel()}`)}${kpi("Couverture estimée", coverageDays === null ? UNAVAILABLE : `${integer.format(coverageDays)} jours`, "au rythme de la sélection")}${kpi("Sous le seuil de sécurité", integer.format(critical), `${integer.format(watch)} à surveiller`, critical ? "Réassort à prévoir" : "Aucune référence", critical ? "error" : "ok")}</div>`
+    + `<div class="dashboard-grid">${panel("Disponibilité par produit", `ATP = magasins + entrepôt + entrant − réservé − vendu. Demande : ${activeScopeLabel()}`, inventoryTable(items), 12, toolbar)}</div>`;
   bindTableSearch("#inventory-search", "#inventory-body");
   document.querySelector("#export-inventory").addEventListener("click", exportInventory);
 }
 
 function customerTable(customers) {
-  return `<div class="data-table-wrap"><table class="data-table"><thead><tr><th>Golden record</th><th>Pays</th><th>Acquisition</th><th>Canaux réconciliés</th><th>Commandes</th><th>Valeur client</th><th>Segment RFM</th><th>Consentement</th></tr></thead><tbody id="customer-body">${customers.map(item => `<tr data-search="${escapeHtml(`${item.customer_id} ${item.segment} ${item.country} ${item.channels}`.toLowerCase())}"><td><div class="product-cell"><span class="product-icon">${item.customer_id.slice(-2)}</span><strong>${item.customer_id}</strong></div></td><td>${item.country}</td><td>${item.acquisition_channel}</td><td>${escapeHtml(item.channels)}</td><td>${item.order_count}</td><td><strong>${euro.format(item.spend)}</strong></td><td><span class="badge healthy">${item.segment}</span></td><td>${item.consent_marketing ? `<span class="badge pass">OPT-IN</span>` : `<span class="badge warn">OPT-OUT</span>`}</td></tr>`).join("")}</tbody></table></div>`;
+  return `<div class="data-table-wrap"><table class="data-table wide"><thead><tr><th>Golden record</th><th>Pays</th><th>Acquisition</th><th>Canaux rapprochés</th><th class="r">Commandes</th><th class="r">Valeur client</th><th>Segment RFM</th><th>Opt-in marketing</th></tr></thead><tbody id="customer-body">${customers.map(item => `<tr data-search="${escapeHtml(`${item.customer_id} ${item.segment} ${item.country} ${item.channels}`.toLowerCase())}"><td class="mono">${escapeHtml(item.customer_id)}</td><td>${escapeHtml(item.country)}</td><td>${escapeHtml(channelLabel(item.acquisition_channel))}</td><td>${escapeHtml(String(item.channels).split(",").map(channelLabel).join(", "))}</td><td class="r">${integer.format(item.order_count)}</td><td class="r">${euro.format(item.spend)}</td><td>${escapeHtml(item.segment)}</td><td>${item.consent_marketing ? "Oui" : "Non"}</td></tr>`).join("")}</tbody></table></div>`;
 }
 
 function renderCustomers() {
   const d = state.data, customers = d.customers;
-  const segments = ["Champions", "Fidèles", "Prometteurs", "Nouveaux"].map(label => ({ label, value: customers.filter(item => item.segment === label).length }));
+  const segments = ["Champions", "Fidèles", "Prometteurs", "Nouveaux"].map(label => {
+    const value = customers.filter(item => item.segment === label).length;
+    return { label, value, detail: `${integer.format(value)} profils` };
+  });
   const omnichannel = customers.filter(item => String(item.channels).includes(",")).length;
-  const toolbar = `<div class="table-tools"><label class="search-box">${icon("search")}<input id="customer-search" type="search" placeholder="ID, pays ou segment…" /></label></div>`;
   const privacyPassed = d.quality.privacy_ok;
-  root.innerHTML = hero("CRM + WEB + POS · IDENTITY RESOLUTION", "Une identité client unifiée", "Les comportements sont rapprochés sans exposer d’email : le modèle analytique ne conserve qu’un hash et des identifiants métier.")
-    + `<div class="kpi-grid">${kpi("Clients actifs", integer.format(d.kpis.customers), activeScopeLabel(), "var(--violet)", "users", "Golden records filtrés")}${kpi("Profils affichés", integer.format(customers.length), "classés par valeur", "var(--cyan)", "users", "Top analytique")}${kpi("Omnicanaux", integer.format(omnichannel), "parmi les profils affichés", "var(--cyan)", "stream", "Plusieurs canaux")}${kpi("Protection PII", privacyPassed ? "100%" : "À corriger", "hashes contrôlés", "var(--lime)", "shield", privacyPassed ? "Contrat validé" : "Publication bloquée")}</div>`
-    + `<div class="dashboard-grid">${panel("Segmentation RFM", "Répartition des profils affichés", donut(segments, "PROFILS"), 4)}${panel("Customer 360 · Golden Records", `Top ${customers.length} sur ${integer.format(d.kpis.customers)} clients actifs`, customerTable(customers), 8, toolbar)}</div>`;
+  const toolbar = `<label class="search-box"><input id="customer-search" type="search" placeholder="Identifiant, pays ou segment" aria-label="Rechercher un client" /></label>`;
+  root.innerHTML = viewHead("Identités client rapprochées", "Les identités CRM, web et caisse sont rapprochées en Golden Records. Le modèle analytique ne garde qu’un hash de l’email et des identifiants métier.")
+    + `<div class="kpi-row">${kpi("Clients actifs", integer.format(d.kpis.customers), activeScopeLabel())}${kpi("Profils affichés", integer.format(customers.length), "classés par valeur client")}${kpi("Profils omnicanaux", integer.format(omnichannel), "plusieurs canaux, parmi les profils affichés")}${kpi("Emails", privacyPassed ? "Hachés" : "Non conformes", "contrôle privacy.email_hash_shape", privacyPassed ? "Contrôle réussi" : "Publication bloquée", privacyPassed ? "ok" : "error")}</div>`
+    + `<div class="dashboard-grid">${panel("Segmentation RFM", "Profils affichés par segment", `<div class="narrow">${shareBars(segments, "Aucun profil sur cette sélection.")}</div>`, 12)}${panel("Golden Records", `${integer.format(customers.length)} premiers sur ${integer.format(d.kpis.customers)} clients actifs`, customerTable(customers), 12, toolbar)}</div>`;
   bindTableSearch("#customer-search", "#customer-body");
 }
+
+function pipelineMetric(node, d) {
+  const platform = d.platform_evidence, q = d.quality;
+  if (node.status === "ready") return "non exécuté";
+  return {
+    "Sources": count(platform.sources?.records, "lignes"),
+    "Amazon S3": count(platform.aws?.s3_objects, "objets"),
+    "Kinesis": count(platform.aws?.kinesis_events, "événements"),
+    "dbt + DuckDB": isNumber(platform.dbt?.models) ? `${platform.dbt.models} modèles, ${platform.dbt.tests} tests` : UNAVAILABLE,
+    "Qualité": `${q.passed}/${q.total} contrôles`,
+    "Publication": statusInfo(platform.publishing?.status).label.toLowerCase(),
+  }[node.name] ?? String(node.metric).toLowerCase();
+}
+
+const stepStatus = {
+  executed: `<span class="badge pass">Exécuté</span>`,
+  emulated: `<span class="badge emulated">Émulé (LocalStack)</span>`,
+  ready: `<span class="badge ready">Non exécuté</span>`,
+};
 
 function renderReliability() {
   const d = state.data;
   const q = d.quality;
   const platform = d.platform_evidence;
+  const gate = platform.publishing || {};
+  const unitGap = gate.unit_delta ?? d.reconciliation.unit_delta;
+  const amountGap = gate.payment_delta ?? d.reconciliation.amount_delta;
+  const gapKnown = isNumber(unitGap) && isNumber(amountGap);
+  const gapText = gapKnown ? `${integer.format(unitGap)} unité · ${euroCents.format(amountGap)}` : UNAVAILABLE;
+  const gapOk = gapKnown && unitGap === 0 && Math.abs(amountGap) <= 0.005;
   const publishable = q.status === "PASS" && d.reconciliation.status === "PASS";
-  const flow = `<div class="pipeline-flow">${d.pipeline.map(node => `<div class="pipeline-node ${node.status}"><div class="node-icon">${node.name.split(" ")[0].slice(0,4).toUpperCase()}<i class="node-status"></i></div><strong>${node.name}</strong><span>${node.role}</span><b>${node.metric}</b></div>`).join("")}</div>`;
-  const proofs = [
-    ["Sources contrôlées", `${platform.sources.count} fichiers · ${integer.format(platform.sources.records)} lignes`],
-    ["AWS local", `${platform.aws.s3_objects} objets S3 · ${integer.format(platform.aws.kinesis_events)} événements Kinesis`],
-    ["Validation événementielle", `${integer.format(platform.aws.lambda_events)} événements validés par le handler`],
-    ["dbt + DuckDB", `${platform.dbt.models} modèles · ${platform.dbt.tests} tests · ${platform.dbt.snapshots} snapshot`],
-    ["Qualité métier", `${q.passed}/${q.total} contrôles réussis`],
-    ["Publishing gate", `${d.reconciliation.unit_delta} unité · ${Number(d.reconciliation.amount_delta).toFixed(2)} € d’écart`],
-  ];
-  const proofGrid = `<div class="check-grid">${proofs.map(([title, detail]) => `<div class="check-item"><div class="check-mark">${icon("check")}</div><div><strong>${escapeHtml(title)}</strong><span>${escapeHtml(detail)}</span></div></div>`).join("")}</div>`;
-  const trust = `<div class="quality-score"><div class="score-ring" style="--score:${q.score}%"><div><strong>${q.score}%</strong><span>QUALITÉ</span></div></div><div class="quality-copy"><h3>${publishable ? "Publication autorisée" : "Publication bloquée"}</h3><p>${publishable ? "Tous les contrôles et rapprochements sont conformes." : "Un écart doit être corrigé avant publication."}</p></div></div>`;
+  const dbt = platform.dbt || {};
+  const dbtKnown = isNumber(dbt.models);
+  const awsRan = platform.aws?.status === "PASS";
 
-  root.innerHTML = hero("AIRFLOW · DBT · DATA QUALITY", "Un pipeline fiable avant publication", "Airflow orchestre les traitements. dbt construit les modèles. La publication reste bloquée tant que les contrôles ne passent pas.")
-    + `<div class="kpi-grid">${kpi("Airflow", `${platform.airflow.tasks} tâches`, platform.airflow.schedule, "var(--lime)", "pipeline", platform.airflow.status)}${kpi("dbt build", `${platform.dbt.models} modèles`, `${platform.dbt.tests} tests + ${platform.dbt.snapshots} snapshot`, "var(--violet)", "shield", platform.dbt.status)}${kpi("Contrôles qualité", `${q.passed}/${q.total}`, "contrats techniques et métier", "var(--cyan)", "shield", q.status)}${kpi("Réconciliation", "0 écart", "unités et paiements", "var(--coral)", "stream", d.reconciliation.status)}</div>`
-    + `<div class="dashboard-grid">${panel("Chaîne exécutée", "Vert : exécuté · orange : API AWS locales", flow, 12, `<div class="evidence-legend"><span class="badge pass">EXÉCUTÉ</span><span class="badge emulated">AWS LOCAL</span></div>`)}${panel("Preuves essentielles", "Les chiffres proviennent des rapports d’exécution", proofGrid, 7)}${panel("Décision de publication", "La donnée n’est exposée qu’après validation", trust, 5, `<span class="badge ${publishable ? "pass" : "critical"}">${publishable ? "PASS" : "BLOCKED"}</span>`)}</div>`;
+  const steps = `<div class="data-table-wrap"><table class="data-table"><thead><tr><th>Étape</th><th>Rôle</th><th>Mesure</th><th>Statut</th></tr></thead><tbody>${d.pipeline.map(node => `<tr><td>${escapeHtml(node.name)}</td><td>${escapeHtml(node.role)}</td><td class="num">${escapeHtml(pipelineMetric(node, d))}</td><td>${stepStatus[node.status] || statusBadge(node.status)}</td></tr>`).join("")}</tbody></table></div>`;
+  const proofs = [
+    ["Sources contrôlées", `${count(platform.sources?.count, "fichiers")}, ${count(platform.sources?.records, "lignes")}`],
+    ["AWS local", awsRan ? `${count(platform.aws.s3_objects, "objets S3")}, ${count(platform.aws.kinesis_events, "événements Kinesis")}` : "non exécuté"],
+    ["Handler Lambda", awsRan ? `${count(platform.aws.lambda_events, "événements validés")} dans le processus local` : "non exécuté"],
+    ["dbt et DuckDB", dbtKnown ? `${dbt.models} modèles, ${dbt.tests} tests, ${dbt.snapshots} snapshot` : `rapport dbt ${UNAVAILABLE}`],
+    ["Contrôles qualité", `${q.passed}/${q.total} réussis`],
+    ["Écart avant publication", gapText],
+  ];
+  const proofList = `<dl class="proof-list">${proofs.map(([title, detail]) => `<dt>${escapeHtml(title)}</dt><dd>${escapeHtml(detail)}</dd>`).join("")}</dl>`;
+  const gateHtml = `<div class="gate"><div class="gate-value">${isNumber(q.score) ? `${integer.format(q.score)} %` : UNAVAILABLE}</div><div class="gate-label ${publishable ? "ok" : "error"}">${publishable ? "Publication autorisée" : "Publication bloquée"}</div><p>${publishable ? `Score qualité du run. Les ${q.total} contrôles et les deux rapprochements sont conformes.` : "Un contrôle ou un rapprochement échoue : les indicateurs ne sont pas publiés."}</p></div>`;
+
+  root.innerHTML = viewHead("Pipeline et contrôles avant publication", "Airflow enchaîne six tâches. La publication n’a lieu que si les contrôles qualité et les rapprochements passent.")
+    + `<div class="kpi-row">${kpi("Airflow", count(platform.airflow?.tasks, "tâches"), escapeHtml(platform.airflow?.schedule || ""), statusInfo(platform.airflow?.status).label, platform.airflow?.status === "PASS" ? "ok" : "warn")}${kpi("dbt build", dbtKnown ? `${dbt.models} modèles` : UNAVAILABLE, dbtKnown ? `${dbt.tests} tests, ${dbt.snapshots} snapshot` : "rapport absent", statusInfo(dbt.status).label, dbt.status === "PASS" ? "ok" : "warn")}${kpi("Contrôles qualité", `${q.passed}/${q.total}`, "contrats techniques et métier", statusInfo(q.status).label, q.status === "PASS" ? "ok" : "error")}${kpi("Réconciliation", gapText, "unités et paiements", gapKnown ? (gapOk ? "Aucun écart" : "Écart détecté") : "", gapOk ? "ok" : "error")}</div>`
+    + `<div class="dashboard-grid">${panel("Étapes du dernier run", "S3 et Kinesis passent par les API émulées de LocalStack", steps, 12, `<div class="evidence-legend">${stepStatus.executed}${stepStatus.emulated}</div>`)}${panel("Chiffres des rapports d’exécution", "Lus dans reports/*.json", proofList, 7)}${panel("Décision de publication", "Qualité et rapprochements", gateHtml, 5)}</div>`;
 }
 
 function exportInventory() {
   const headers = ["product_id", "name", "category", "store_stock", "warehouse_stock", "reserved", "incoming", "units_sold", "selected_units_sold", "safety_stock", "atp", "risk_level"];
   const quote = value => `"${String(value ?? "").replaceAll('"', '""')}"`;
   const csv = [headers.join(";"), ...state.data.inventory.map(item => headers.map(key => quote(item[key])).join(";"))].join("\n");
-  const blob = new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8" });
+  const blob = new Blob([`﻿${csv}`], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -210,7 +248,7 @@ function exportInventory() {
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-  showToast(`Snapshot ATP exporté · ${activeScopeLabel()}`);
+  showToast(`Stock exporté, ${activeScopeLabel()}`);
 }
 
 function bindTableSearch(inputSelector, bodySelector) {
@@ -218,7 +256,7 @@ function bindTableSearch(inputSelector, bodySelector) {
   if (!input) return;
   input.addEventListener("input", () => {
     const query = input.value.trim().toLowerCase();
-    document.querySelectorAll(`${bodySelector} tr`).forEach(row => row.hidden = !row.dataset.search.includes(query));
+    document.querySelectorAll(`${bodySelector} tr`).forEach(row => { row.hidden = !row.dataset.search.includes(query); });
   });
 }
 
@@ -228,8 +266,6 @@ function bindInlineActions() {
 
 function render() {
   if (!state.data) return;
-  root.style.animation = "none";
-  requestAnimationFrame(() => root.style.animation = "viewIn .28s ease both");
   ({ overview: renderOverview, inventory: renderInventory, customers: renderCustomers, reliability: renderReliability }[state.view])();
 }
 
@@ -237,28 +273,38 @@ async function loadData(showFeedback = false) {
   const requestId = ++state.requestId;
   state.loading = true;
   document.querySelector("#refresh-data").disabled = true;
-  if (!state.data) root.innerHTML = `<div class="kpi-grid"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div><div class="skeleton" style="height:340px"></div>`;
+  if (!state.data) root.innerHTML = `<p class="loading-state">Chargement des données…</p>`;
   try {
     let data = window.RETAIL_CORE_STATIC?.dashboards?.[`${state.channel}-${state.period}`];
+    let mode = "démo statique";
     if (!data) {
       const response = await fetch(`/api/dashboard?channel=${state.channel}&period=${state.period}`, { cache: "no-store" });
       if (!response.ok) throw new Error("API indisponible");
       data = await response.json();
+      mode = "démo locale";
     }
     if (requestId !== state.requestId) return;
     state.data = data;
-    document.querySelector("#last-run").textContent = new Date(state.data.meta.generated_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-    document.querySelector("#contract-version").textContent = state.data.meta.data_contract;
-    document.querySelector("#latency-sla").textContent = `p95 ${integer.format(state.data.kpis.latency_p95_ms)} ms · cible < 3 s`;
+    document.querySelector("#run-mode").textContent = mode;
+    document.title = `Retail Core, ${mode}`;
+    const status = runStatus(data);
+    const statusNode = document.querySelector("#run-status");
+    statusNode.textContent = status.text;
+    statusNode.className = `run-status ${status.tone}`;
+    document.querySelector("#last-run").textContent = new Date(data.meta.generated_at).toLocaleString("fr-FR", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
+    document.querySelector("#contract-version").textContent = data.meta.data_contract;
+    document.querySelector("#latency-sla").textContent = isNumber(data.kpis.latency_p95_ms)
+      ? `Latence p95 : ${integer.format(data.kpis.latency_p95_ms)} ms, cible < 3 s`
+      : `Latence p95 ${UNAVAILABLE}`;
     updateScopeUi();
     render();
-    if (showFeedback) {
-      const globalScope = globalViewScopes[state.view];
-      showToast(globalScope ? `${globalScope.pill} actualisé` : `Périmètre appliqué · ${activeScopeLabel()}`);
-    }
+    if (showFeedback) showToast(globalViews.has(state.view) ? "Dernier run complet relu" : `Périmètre appliqué : ${activeScopeLabel()}`);
   } catch (error) {
     if (requestId !== state.requestId) return;
-    root.innerHTML = `<div class="error-state"><strong>Le cockpit n’arrive pas à joindre le pipeline.</strong>Lancez <code>python3 run_demo.py</code>, puis <code>python3 serve.py</code>.</div>`;
+    const statusNode = document.querySelector("#run-status");
+    statusNode.textContent = "Données indisponibles";
+    statusNode.className = "run-status error";
+    root.innerHTML = `<div class="error-state"><strong>Le tableau de bord n’arrive pas à joindre le pipeline.</strong>Lancez <code>python3 run_demo.py</code>, puis <code>python3 serve.py</code>.</div>`;
   } finally {
     if (requestId === state.requestId) {
       state.loading = false;
@@ -268,12 +314,15 @@ async function loadData(showFeedback = false) {
 }
 
 function switchView(view) {
+  if (!viewNames.includes(view)) return;
   state.view = view;
+  history.replaceState(null, "", view === "overview" ? location.pathname + location.search : `#${view}`);
   window.scrollTo({ top: 0, left: 0, behavior: "instant" });
-  document.querySelector("#page-title").textContent = viewTitles[view];
-  document.querySelectorAll(".nav-item").forEach(item => item.classList.toggle("active", item.dataset.view === view));
-  document.querySelector("#sidebar").classList.remove("open");
-  document.querySelector("#mobile-menu").setAttribute("aria-expanded", "false");
+  document.querySelectorAll(".nav-item").forEach(item => {
+    const active = item.dataset.view === view;
+    item.classList.toggle("active", active);
+    if (active) item.setAttribute("aria-current", "page"); else item.removeAttribute("aria-current");
+  });
   updateScopeUi();
   render();
 }
@@ -282,6 +331,6 @@ document.querySelectorAll(".nav-item").forEach(item => item.addEventListener("cl
 document.querySelector("#channel-filter").addEventListener("change", event => { state.channel = event.target.value; loadData(true); });
 document.querySelector("#period-filter").addEventListener("change", event => { state.period = Number(event.target.value); loadData(true); });
 document.querySelector("#refresh-data").addEventListener("click", () => loadData(true));
-document.querySelector("#mobile-menu").addEventListener("click", event => { const opened = document.querySelector("#sidebar").classList.toggle("open"); event.currentTarget.setAttribute("aria-expanded", String(opened)); });
-updateScopeUi();
+const viewNames = [...document.querySelectorAll(".nav-item")].map(item => item.dataset.view);
+switchView(location.hash.slice(1) || "overview");
 loadData();
