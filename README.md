@@ -4,7 +4,11 @@
 
 Plateforme data retail omnicanale qui rapproche ventes, paiements, stocks, événements et identités client avant de publier des indicateurs fiables.
 
-**Application :** [Retail Core Command Center](https://ikel0.github.io/retail-core-lakehouse/)
+Démo statique : [ikel0.github.io/retail-core-lakehouse](https://ikel0.github.io/retail-core-lakehouse/)
+
+![Vue d’ensemble de la démo : chiffre d’affaires quotidien, répartition par canal, catégories et rapprochements batch/Kinesis et ventes/paiements](docs/demo.png)
+
+La capture montre la vue d’ensemble sur 30 jours, tous canaux : 960 commandes, 73 328 € de chiffre d’affaires et des rapprochements sans écart (0 unité, 0,00 €). Le bandeau d’état est calculé à partir des rapports du run, pas écrit en dur.
 
 ## Ce que le projet résout
 
@@ -90,6 +94,15 @@ Sans Docker :
 python3 run_demo.py
 python3 serve.py
 ```
+
+## Limites
+
+- Les données sont synthétiques : `src/generate_data.py` utilise une graine fixe (42), les volumes sont donc identiques d’un run à l’autre, mais les dates sont recalées sur l’heure de génération.
+- S3, Kinesis et CloudWatch sont émulés par LocalStack. Aucun compte AWS n’est utilisé et le code Terraform est validé (`terraform validate`), jamais appliqué.
+- Le handler compatible Lambda tourne dans le processus Python local, pas dans AWS Lambda.
+- La démo en ligne est un instantané : `build_static_site.py` précalcule les 12 combinaisons canal × période dans `static-data.js`. Le bouton « Actualiser » relit ces données, il ne relance pas le pipeline.
+- Les chiffres Airflow, dbt et LocalStack de la démo viennent des rapports `reports/*.json` du dernier run complet (8 septembre 2026). Sans Docker, `python3 run_demo.py` ne produit que les contrôles Python : le tableau de bord affiche alors ces étapes comme non exécutées.
+- La publication sur GitHub Pages (branche `gh-pages`) se fait à la main ; la CI vérifie le build mais ne déploie pas.
 
 ## Documentation
 
