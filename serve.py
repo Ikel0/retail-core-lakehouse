@@ -263,9 +263,11 @@ def build_dashboard(channel: str = "all", period: int = 30) -> dict:
         "dbt": {
             "status": "PASS" if dbt_ok else "READY",
             "adapter": dbt_report.get("adapter", "duckdb"),
-            "models": dbt_report.get("models", 19),
-            "tests": dbt_report.get("tests", 78),
-            "snapshots": dbt_report.get("snapshots", 1),
+            # Sans rapport dbt, ces chiffres restent vides : le tableau de bord les affiche
+            # comme indisponibles au lieu de reprendre ceux d'un run précédent.
+            "models": dbt_report.get("models"),
+            "tests": dbt_report.get("tests"),
+            "snapshots": dbt_report.get("snapshots"),
             "failed": len(dbt_report.get("failed", [])),
         },
         "publishing": {
@@ -299,7 +301,7 @@ def build_dashboard(channel: str = "all", period: int = 30) -> dict:
             {"name": "Sources", "role": "8 extractions retail contrôlées", "status": "executed", "metric": f"{platform_evidence['sources']['records']} LIGNES"},
             {"name": "Amazon S3", "role": "Raw partitionné · LocalStack", "status": "emulated" if aws_ok else "ready", "metric": f"{platform_evidence['aws']['s3_objects']} OBJETS"},
             {"name": "Kinesis", "role": "Streaming · LocalStack", "status": "emulated" if aws_ok else "ready", "metric": f"{platform_evidence['aws']['kinesis_events']} EVENTS"},
-            {"name": "dbt + DuckDB", "role": "Transformations et tests", "status": "executed" if dbt_ok else "ready", "metric": f"{platform_evidence['dbt']['models']} MODÈLES"},
+            {"name": "dbt + DuckDB", "role": "Transformations et tests", "status": "executed" if dbt_ok else "ready", "metric": f"{platform_evidence['dbt']['models']} MODÈLES" if dbt_ok else "NON EXÉCUTÉ"},
             {"name": "Qualité", "role": "Contrats et rapprochements", "status": "executed", "metric": f"{quality['quality']['passed']}/{quality['quality']['total']} PASS"},
             {"name": "Publication", "role": "Barrière de confiance", "status": "executed" if published else "ready", "metric": platform_evidence["publishing"]["status"]},
         ],
