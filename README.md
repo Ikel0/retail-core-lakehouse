@@ -8,7 +8,7 @@ Démo statique : [ikel0.github.io/retail-core-lakehouse](https://ikel0.github.io
 
 ![Flash ventes du 8 septembre 2026 : tableau par canal avec chiffre d’affaires, commandes, panier moyen, écarts et courbe quotidienne, puis catégories et rapprochements](docs/demo.png)
 
-La capture montre le flash ventes sur 30 jours, tous canaux : 960 commandes et 73 328 € de chiffre d’affaires, avec pour chaque canal les écarts sur la dernière semaine complète et sur le même jour de la semaine précédente. Plus bas, les rapprochements sont sans écart (0 unité, 0,00 €). L’état du run en tête est calculé à partir des rapports, pas écrit en dur.
+La capture montre le flash au 7 septembre 2026, tous canaux : 71 160 € et 931 commandes sur les 28 jours complets de la série, avec pour chaque canal l’écart de la semaine close contre la précédente et du jour contre le même jour de la semaine précédente. Le curseur « Jour du flash » place le tableau sur n’importe quel jour du 24 août au 7 septembre (le premier qui a 13 jours d’historique) ; « Rejouer jour par jour » avance d’un jour toutes les 1,5 s, avec Pause et Réinitialiser. Ce recalcul est fait dans le navigateur par `dashboard/flash.js`, à partir des séries quotidiennes publiées, et testé par `node --test tests/flash.test.js`. L’état du run en tête est calculé à partir des rapports, pas écrit en dur.
 
 ## Ce que le projet résout
 
