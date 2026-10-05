@@ -173,8 +173,9 @@ function flashBody(d) {
     return `<tr${row.total ? ' class="total"' : ""}><th scope="row">${escapeHtml(row.label)}</th><td class="r">${euro.format(row.revenue)}</td><td class="r">${integer.format(row.orders)}</td><td class="r">${row.basket === null ? "–" : euroCents.format(row.basket)}</td><td class="r">${share(row.revenue, all.revenue)}</td><td class="r${week.negative ? " neg" : ""}">${week.text}</td><td class="r">${euro.format(row.dayRevenue)}</td><td class="r${sameDay.negative ? " neg" : ""}">${sameDay.text}</td><td class="spark-col">${sparkline(row, day, b)}</td></tr>`;
   });
   const cutTime = new Date(d.meta.generated_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }).replace(":", " h ");
-  const note = `Cumuls sur ${count(all.days, "jour complet", "jours complets")}, du ${dayLabel(all.from)} au ${dayLabel(day)} ; les journées partielles du ${dayLabel(Flash.addDays(b.firstFull, -1))} et du ${dayLabel(b.endIso)} (arrêtée à ${cutTime}) sont exclues. Écarts : semaine close le ${dayLabel(day)} contre la précédente, ${dayLabel(day)} contre ${dayLabel(all.comparisonDay)}. Le curseur commence au ${dayLabel(b.firstSnapshot)}, premier jour qui a ses 13 jours d’historique ; les blocs suivants portent sur ${inlineScopeLabel()}.`;
-  return `<p class="note">${note}</p>${table(headers, body, { className: "flash", caption: `Flash ventes par canal au ${dayLabel(day, "long")}` })}`
+  const note = `Cumuls sur ${count(all.days, "jour complet", "jours complets")}, du ${dayLabel(all.from, "long")} au ${dayLabel(day, "long")}. Écarts : semaine close ce jour contre la précédente, et jour contre le ${dayLabel(all.comparisonDay, "long")}.`;
+  const method = `<details class="method"><summary>Méthode de calcul</summary><p>Les journées partielles du ${dayLabel(Flash.addDays(b.firstFull, -1))} et du ${dayLabel(b.endIso)} (arrêtée à ${cutTime}) sont exclues des cumuls et des courbes. Le curseur commence au ${dayLabel(b.firstSnapshot)}, premier jour qui a ses 13 jours d’historique pour les écarts. Il ne déplace que ce tableau : les blocs suivants portent sur ${inlineScopeLabel()}.</p></details>`;
+  return `<p class="note">${note}</p>${method}${table(headers, body, { className: "flash", caption: `Flash ventes par canal au ${dayLabel(day, "long")}` })}`
     + `<p class="spark-readout" id="spark-readout" aria-live="polite">Survolez ou touchez une courbe, ou parcourez-la au clavier, pour lire un jour ; un clic ou Entrée y place le flash.</p>`
     + dailyTable(rows, day, b);
 }
@@ -186,7 +187,7 @@ function flashSection(d) {
   const controls = `<div class="flash-controls">
     <label class="flash-label" for="flash-day">Jour du flash <output id="flash-day-out" for="flash-day">${dayLabel(day, "long")}</output></label>
     <div class="flash-range"><input type="range" id="flash-day" min="0" max="${b.snapshots - 1}" step="1" value="${index}" aria-valuetext="${dayLabel(day, "long")}" /><div class="range-ends" aria-hidden="true"><span>${dayLabel(b.firstSnapshot)}</span><span>${dayLabel(b.lastFull)}</span></div></div>
-    <button type="button" class="button" id="flash-play">${state.playTimer ? "Pause" : state.playPaused ? "Reprendre" : "Rejouer jour par jour"}</button>
+    <button type="button" class="button primary" id="flash-play">${state.playTimer ? "Pause" : state.playPaused ? "Reprendre" : "Rejouer jour par jour"}</button>
     <button type="button" class="button" id="flash-reset">Réinitialiser</button>
     <p class="visually-hidden" id="flash-live" aria-live="polite"></p>
   </div>`;
