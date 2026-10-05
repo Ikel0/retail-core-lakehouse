@@ -28,10 +28,11 @@ def main() -> None:
     html = (dashboard / "index.html").read_text(encoding="utf-8")
     styles = (dashboard / "styles.css").read_text(encoding="utf-8")
     application = (dashboard / "app.js").read_text(encoding="utf-8")
+    flash = (dashboard / "flash.js").read_text(encoding="utf-8")
     payload = json.dumps(build_static_payload(), ensure_ascii=False, separators=(",", ":"))
     static_data = f"window.RETAIL_CORE_STATIC = {payload};\n"
     asset_version = sha256(
-        (styles + application + static_data).encode("utf-8")
+        (styles + flash + application + static_data).encode("utf-8")
     ).hexdigest()[:12]
 
     stylesheet_tag = '    <link rel="stylesheet" href="./styles.css" />'
@@ -41,6 +42,11 @@ def main() -> None:
         stylesheet_tag,
         f'    <link rel="stylesheet" href="./styles.css?v={asset_version}" />',
     )
+
+    flash_tag = '    <script src="./flash.js" defer></script>'
+    if flash_tag not in html:
+        raise RuntimeError("Dashboard flash script tag not found")
+    html = html.replace(flash_tag, f'    <script src="./flash.js?v={asset_version}" defer></script>')
 
     script_tag = '    <script src="./app.js" defer></script>'
     if script_tag not in html:
@@ -54,6 +60,7 @@ def main() -> None:
     (OUTPUT / "index.html").write_text(html, encoding="utf-8")
     (OUTPUT / "styles.css").write_text(styles, encoding="utf-8")
     (OUTPUT / "app.js").write_text(application, encoding="utf-8")
+    (OUTPUT / "flash.js").write_text(flash, encoding="utf-8")
     (OUTPUT / "static-data.js").write_text(static_data, encoding="utf-8")
     (OUTPUT / ".nojekyll").write_text("", encoding="utf-8")
     print(f"Built standalone static site in {OUTPUT}")
