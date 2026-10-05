@@ -3,45 +3,41 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="Retail Core Lakehouse : ventes, stock, identités client et contrôles de publication sur données synthétiques." />
+    <meta name="description" content="Retail Core Lakehouse : flash ventes par canal, stock et contrôles de publication, calculés sur des données retail synthétiques." />
     <title>Retail Core, démo statique</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono&family=IBM+Plex+Sans:wght@400;600&display=swap" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <header class="site-header">
+    <header class="masthead">
       <div class="container">
-        <h1>Retail Core, <span id="run-mode">démo statique</span></h1>
-        <p class="intro">Ventes, paiements, stock, événements et identités client rapprochés avant publication. Données synthétiques, pipeline exécuté en local (Airflow, dbt, LocalStack). <a href="https://github.com/Ikel0/retail-core-lakehouse">Code source</a></p>
+        <a class="back" href="https://ikel0.github.io/">← Portfolio</a>
+        <h1>Retail Core Lakehouse <span class="h1-rest">rapproche les ventes web, magasins et marketplace avec les paiements et le stock, et ne publie le flash du matin que si les contrôles passent.</span></h1>
+
         <nav class="tabs" aria-label="Vues du tableau de bord">
-          <button type="button" class="nav-item active" data-view="overview" aria-current="page">Vue d’ensemble</button>
+          <button type="button" class="nav-item active" data-view="overview" aria-current="page">Flash ventes</button>
           <button type="button" class="nav-item" data-view="inventory">Stock et ATP</button>
           <button type="button" class="nav-item" data-view="customers">Customer 360</button>
           <button type="button" class="nav-item" data-view="reliability">Fiabilité data</button>
         </nav>
+
+        <div class="toolbar">
+          <label class="select-wrap">Canal <select id="channel-filter"><option value="all">Tous les canaux</option><option value="web">E-commerce</option><option value="store">Magasins</option><option value="marketplace">Marketplace</option></select></label>
+          <label class="select-wrap">Période <select id="period-filter"><option value="7">7 jours</option><option value="14">14 jours</option><option value="30" selected>30 jours</option></select></label>
+          <p class="scope-mode" id="scope-mode" hidden>Cette vue porte sur le dernier run complet, sans filtre.</p>
+          <button type="button" class="button" id="refresh-data">Actualiser</button>
+        </div>
+        <p class="run-line"><span class="run-status" id="run-status">Lecture de l’état du run…</span><span class="sep" aria-hidden="true"> · </span><span id="run-mode">démo statique</span>, données du <span id="last-run">…</span><span class="sep" aria-hidden="true"> · </span>contrat <span class="mono" id="contract-version">…</span></p>
       </div>
     </header>
 
-    <div class="container">
-      <div class="toolbar">
-        <label class="select-wrap">Canal <select id="channel-filter"><option value="all">Tous les canaux</option><option value="web">E-commerce</option><option value="store">Magasins</option><option value="marketplace">Marketplace</option></select></label>
-        <label class="select-wrap">Période <select id="period-filter"><option value="7">7 jours</option><option value="14">14 jours</option><option value="30" selected>30 jours</option></select></label>
-        <p class="scope-mode" id="scope-mode" hidden>Cette vue porte sur le dernier run complet, sans filtre.</p>
-        <button type="button" class="primary-button" id="refresh-data">Actualiser</button>
-      </div>
+    <main id="view-root" class="container view-root" aria-live="polite"></main>
 
-      <div class="status-strip">
-        <span class="run-status" id="run-status">Statut du run en cours de lecture</span>
-        <span id="scope-status">Tous les canaux, 30 jours</span>
-        <span>Données générées le <b id="last-run">…</b></span>
-        <span>Contrat <b class="mono" id="contract-version">…</b></span>
-        <span id="latency-sla">Latence p95 …</span>
-      </div>
-
-      <main id="view-root" class="view-root" aria-live="polite"></main>
-    </div>
+    <footer class="container colophon">
+      <p><a href="https://github.com/Ikel0/retail-core-lakehouse">Code sur GitHub</a><span class="sep" aria-hidden="true"> · </span>données synthétiques générées avec une graine fixe, sans information personnelle réelle<span class="sep" aria-hidden="true"> · </span>licence MIT</p>
+    </footer>
 
     <div class="toast" id="toast" role="status"></div>
     <script src="./app.js" defer></script>
