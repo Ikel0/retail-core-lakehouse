@@ -6,9 +6,9 @@ Plateforme data retail omnicanale qui rapproche ventes, paiements, stocks, évé
 
 Démo statique : [ikel0.github.io/retail-core-lakehouse](https://ikel0.github.io/retail-core-lakehouse/)
 
-![Vue d’ensemble de la démo : chiffre d’affaires quotidien, répartition par canal, catégories et rapprochements batch/Kinesis et ventes/paiements](docs/demo.png)
+![Flash ventes du 8 septembre 2026 : tableau par canal avec chiffre d’affaires, commandes, panier moyen, écarts et courbe quotidienne, puis catégories et rapprochements](docs/demo.png)
 
-La capture montre la vue d’ensemble sur 30 jours, tous canaux : 960 commandes, 73 328 € de chiffre d’affaires et des rapprochements sans écart (0 unité, 0,00 €). Le bandeau d’état est calculé à partir des rapports du run, pas écrit en dur.
+La capture montre le flash ventes sur 30 jours, tous canaux : 960 commandes et 73 328 € de chiffre d’affaires, avec pour chaque canal les écarts sur la dernière semaine complète et sur le même jour de la semaine précédente. Plus bas, les rapprochements sont sans écart (0 unité, 0,00 €). L’état du run en tête est calculé à partir des rapports, pas écrit en dur.
 
 ## Ce que le projet résout
 
@@ -55,7 +55,7 @@ Apache Airflow · 6 tâches
 
 | Vue | Décision couverte |
 |---|---|
-| Vue d’ensemble | performance commerciale par canal et période |
+| Flash ventes | chiffre d’affaires, commandes et écarts par canal, catégories, rapprochements |
 | Stock & ATP | disponibilité, demande, couverture et risque de rupture |
 | Customer 360 | identité omnicanale, valeur client et segmentation RFM |
 | Fiabilité data | Airflow, dbt, AWS local, contrôles et publishing gate |
