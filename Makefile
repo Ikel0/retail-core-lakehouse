@@ -10,6 +10,7 @@ serve:
 
 test:
 	PYTHONPATH=. python3 -m unittest discover -s tests -v
+	node --test tests/flash.test.js
 
 static-site:
 	python3 run_demo.py

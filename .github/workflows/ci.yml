@@ -33,7 +33,9 @@ jobs:
         run: |
           python run_demo.py
           python -m unittest discover -s tests -v
+          node --check dashboard/flash.js
           node --check dashboard/app.js
+          node --test tests/flash.test.js
 
       - name: Run dbt quality gate
         run: python -m src.dbt_runner build --full-refresh --no-generate
